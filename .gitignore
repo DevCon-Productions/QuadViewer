@@ -1,0 +1,5 @@
+profiles/
+__pycache__/
+*.pyc
+assignments.json
+extension/
