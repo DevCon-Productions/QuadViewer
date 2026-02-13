@@ -1,94 +1,116 @@
 [
   {
     "name": "ESPN",
-    "url": "https://www.fubo.tv/p/watch?channelId%3D10179%26type%3Dlive"
+    "url": "https://www.fubo.tv/p/watch?channelId%3D10179%26type%3Dlive",
+    "logo": "espn.png"
   },
   {
     "name": "ESPN2",
-    "url": ""
+    "url": "https://www.fubo.tv/p/watch?channelId%3D12444%26type%3Dlive",
+    "logo": "espn2.png"
   },
   {
     "name": "ABC",
-    "url": "https://www.fubo.tv/p/watch?channelId%3D21101%26type%3Dlive"
+    "url": "https://www.fubo.tv/p/watch?channelId%3D21101%26type%3Dlive",
+    "logo": "abc.png"
   },
   {
     "name": "CNN",
-    "url": "https://watch.spectrum.net/livetv?tmsid=58646"
+    "url": "https://watch.spectrum.net/livetv?tmsid=58646",
+    "logo": "cnn.png"
+  },
+  {
+    "name": "Fox Weather",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D135986%26type%3Dlive",
+    "logo": "foxweather.png"
   },
   {
     "name": "MS NOW",
-    "url": "https://watch.spectrum.net/livetv?tmsid=64241"
+    "url": "https://watch.spectrum.net/livetv?tmsid=64241",
+    "logo": "msnbc.png"
   },
   {
-    "name": "Fox News",
-    "url": ""
+    "name": "CBS",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D21320%26type%3Dlive",
+    "logo": "cbs.png"
   },
   {
     "name": "Fox Sports 1",
-    "url": ""
+    "url": "https://www.fubo.tv/p/watch?channelId%3D94653%26type%3Dlive",
+    "logo": "foxsports1.png"
   },
   {
-    "name": "NBC Sports",
-    "url": ""
+    "name": "Fox",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D11590%26type%3Dlive",
+    "logo": "fox.png"
+  },
+  {
+    "name": "FanDuel",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D16176%26type%3Dlive",
+    "logo": "fanduel.png"
   },
   {
     "name": "CBS Sports",
-    "url": ""
+    "url": "https://www.fubo.tv/p/watch?channelId%3D69495%26type%3Dlive",
+    "logo": "cbssports.png"
   },
   {
-    "name": "TNT",
-    "url": ""
-  },
-  {
-    "name": "TBS",
-    "url": ""
-  },
-  {
-    "name": "USA Network",
-    "url": ""
+    "name": "ABC News",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D127957%26type%3Dlive",
+    "logo": "abcnews.png"
   },
   {
     "name": "NFL Network",
-    "url": ""
+    "url": "https://www.fubo.tv/p/watch?channelId%3D45409%26type%3Dlive",
+    "logo": "nflnetwork.png"
   },
   {
     "name": "MLB Network",
-    "url": ""
+    "url": "https://www.fubo.tv/p/watch?channelId%3D72650%26type%3Dlive",
+    "logo": "mlbnetwork.png"
   },
   {
     "name": "NBA TV",
-    "url": ""
-  },
-  {
-    "name": "Golf Channel",
-    "url": ""
+    "url": "https://www.fubo.tv/p/watch?channelId%3D45537%26type%3Dlive",
+    "logo": "nbatv.png"
   },
   {
     "name": "CNBC",
-    "url": ""
+    "url": "https://watch.spectrum.net/livetv?tmsid=58780",
+    "logo": "cnbc.png"
   },
   {
     "name": "Fox Business",
-    "url": ""
-  },
-  {
-    "name": "Comedy Central",
-    "url": ""
+    "url": "https://www.fubo.tv/p/watch?channelId%3D68900%26type%3Dlive",
+    "logo": "foxbusiness.png"
   },
   {
     "name": "Discovery",
     "url": ""
   },
   {
-    "name": "HGTV",
-    "url": ""
+    "name": "Bloomberg",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D83287%26type%3Dlive",
+    "logo": "bloomberg.png"
   },
   {
-    "name": "ESPN",
-    "url": "https://www.fubo.tv/p/watch?channelId%3D10179%26type%3Dlive"
+    "name": "Fox Sports 2",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D69553%26type%3Dlive",
+    "logo": "foxsports2.png"
   },
   {
-    "name": "TBS",
-    "url": "https://www.fubo.tv/p/watch?channelId%3D10179%26type%3Dlive"
+    "name": "Big 10 Network",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D71605%26type%3Dlive",
+    "logo": "bigten.png"
+  },
+  {
+    "name": "ESPN U",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D71094%26type%3Dlive",
+    "logo": "espnu.png"
+  },
+  {
+    "name": "SEC Network",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D102137%26type%3Dlive",
+    "logo": "secnetwork.png"
   }
 ]

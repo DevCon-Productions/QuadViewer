@@ -16,8 +16,11 @@ import struct
 import subprocess
 import threading
 import time
+import shutil
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
+
+from PIL import Image, ImageTk
 
 # ---------------------------------------------------------------------------
 # Paths & constants
@@ -26,6 +29,11 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CHANNELS_FILE = os.path.join(SCRIPT_DIR, "channels.json")
 ASSIGNMENTS_FILE = os.path.join(SCRIPT_DIR, "assignments.json")
 PROFILES_DIR = os.path.join(SCRIPT_DIR, "profiles")
+LOGOS_DIR = os.path.join(SCRIPT_DIR, "logos")
+
+# Logo display sizes (pixels)
+LOGO_SMALL = 24   # channel list
+LOGO_LARGE = 48   # quadrant frames
 
 CHROME_PATHS = [
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -101,8 +109,33 @@ QUADRANTS = {
 WIN_BORDER = 8
 
 
+def _is_taskbar_autohide():
+    """Check if the Windows taskbar is set to auto-hide."""
+    class APPBARDATA(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", ctypes.wintypes.DWORD),
+            ("hWnd", ctypes.wintypes.HWND),
+            ("uCallbackMessage", ctypes.wintypes.UINT),
+            ("uEdge", ctypes.wintypes.UINT),
+            ("rc", ctypes.wintypes.RECT),
+            ("lParam", ctypes.wintypes.LPARAM),
+        ]
+    ABM_GETSTATE = 0x00000004
+    ABS_AUTOHIDE = 0x0000001
+    abd = APPBARDATA()
+    abd.cbSize = ctypes.sizeof(APPBARDATA)
+    state = ctypes.windll.shell32.SHAppBarMessage(ABM_GETSTATE, ctypes.byref(abd))
+    return bool(state & ABS_AUTOHIDE)
+
+
 def get_work_area():
-    """Get usable screen rectangle excluding the taskbar (Windows)."""
+    """Get usable screen rectangle. Uses full screen if taskbar is auto-hidden."""
+    if _is_taskbar_autohide():
+        # Taskbar auto-hides: use full screen dimensions
+        w = ctypes.windll.user32.GetSystemMetrics(0)   # SM_CXSCREEN
+        h = ctypes.windll.user32.GetSystemMetrics(1)   # SM_CYSCREEN
+        return 0, 0, w, h
+    # Normal taskbar: use work area (excludes taskbar)
     rect = ctypes.wintypes.RECT()
     ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0)
     return rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
@@ -394,14 +427,32 @@ class ChannelDialog(tk.Toplevel):
 
         ttk.Label(self, text="Channel Name:").grid(row=0, column=0, sticky="w", **pad)
         self.name_var = tk.StringVar(value=channel["name"] if channel else "")
-        ttk.Entry(self, textvariable=self.name_var, width=50).grid(row=0, column=1, **pad)
+        self._name_entry = ttk.Entry(self, textvariable=self.name_var, width=50)
+        self._name_entry.grid(row=0, column=1, **pad)
 
         ttk.Label(self, text="URL:").grid(row=1, column=0, sticky="w", **pad)
         self.url_var = tk.StringVar(value=channel.get("url", "") if channel else "")
         ttk.Entry(self, textvariable=self.url_var, width=50).grid(row=1, column=1, **pad)
 
+        # Logo picker
+        ttk.Label(self, text="Logo:").grid(row=2, column=0, sticky="w", **pad)
+        logo_frame = ttk.Frame(self)
+        logo_frame.grid(row=2, column=1, sticky="w", **pad)
+        self.logo_var = tk.StringVar(value=channel.get("logo", "") if channel else "")
+        ttk.Entry(logo_frame, textvariable=self.logo_var, width=36).pack(side=tk.LEFT)
+        ttk.Button(logo_frame, text="Browse...", command=self._browse_logo).pack(
+            side=tk.LEFT, padx=(4, 0)
+        )
+
+        # Logo preview
+        self._logo_preview_label = ttk.Label(self, text="")
+        self._logo_preview_label.grid(row=3, column=1, sticky="w", **pad)
+        self._preview_img = None
+        self._update_logo_preview()
+        self.logo_var.trace_add("write", lambda *_: self._update_logo_preview())
+
         btn_frame = ttk.Frame(self)
-        btn_frame.grid(row=2, column=0, columnspan=2, pady=10)
+        btn_frame.grid(row=4, column=0, columnspan=2, pady=10)
         ttk.Button(btn_frame, text="OK", command=self._ok).pack(side=tk.LEFT, padx=6)
         ttk.Button(btn_frame, text="Cancel", command=self.destroy).pack(side=tk.LEFT, padx=6)
 
@@ -419,6 +470,43 @@ class ChannelDialog(tk.Toplevel):
         h = self.winfo_height()
         self.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
 
+        # Auto-focus the name field so user can start typing immediately
+        self._name_entry.focus_set()
+        self._name_entry.icursor(tk.END)
+
+    def _browse_logo(self):
+        path = filedialog.askopenfilename(
+            parent=self,
+            title="Select Logo Image",
+            filetypes=[
+                ("Image files", "*.png *.jpg *.jpeg *.gif *.bmp *.ico *.webp"),
+                ("All files", "*.*"),
+            ],
+        )
+        if path:
+            # Copy to logos dir with a sanitised filename
+            os.makedirs(LOGOS_DIR, exist_ok=True)
+            fname = os.path.basename(path)
+            dest = os.path.join(LOGOS_DIR, fname)
+            if os.path.abspath(path) != os.path.abspath(dest):
+                shutil.copy2(path, dest)
+            self.logo_var.set(fname)
+
+    def _update_logo_preview(self):
+        fname = self.logo_var.get().strip()
+        logo_path = os.path.join(LOGOS_DIR, fname) if fname else ""
+        if logo_path and os.path.isfile(logo_path):
+            try:
+                img = Image.open(logo_path)
+                img.thumbnail((LOGO_LARGE, LOGO_LARGE), Image.LANCZOS)
+                self._preview_img = ImageTk.PhotoImage(img)
+                self._logo_preview_label.config(image=self._preview_img, text="")
+                return
+            except Exception:
+                pass
+        self._preview_img = None
+        self._logo_preview_label.config(image="", text="(no logo)" if not fname else "(not found)")
+
     def _ok(self):
         name = self.name_var.get().strip()
         if not name:
@@ -427,6 +515,7 @@ class ChannelDialog(tk.Toplevel):
         self.result = {
             "name": name,
             "url": self.url_var.get().strip(),
+            "logo": self.logo_var.get().strip(),
         }
         self.destroy()
 
@@ -445,6 +534,10 @@ class QuadViewerApp:
         self.processes = []
         self.active_ports = {}        # quad_name -> CDP debug port
         self.audio_quad = "Upper Left"  # currently unmuted quadrant
+
+        # Logo image caches (keep references so tkinter doesn't GC them)
+        self._logo_small = {}   # logo filename -> PhotoImage (24x24)
+        self._logo_large = {}   # logo filename -> PhotoImage (48x48)
 
         # Restore saved quadrant assignments
         self._restore_assignments()
@@ -473,11 +566,24 @@ class QuadViewerApp:
             if idx is not None and 0 <= idx < len(self.channels):
                 self.assignments[quad_name] = self.channels[idx]
 
+    def _update_quad_display(self, quad_name, channel):
+        """Update a quadrant's label and logo image."""
+        if channel:
+            self.quad_labels[quad_name].config(text=channel["name"])
+            logo = self._get_logo(channel.get("logo", ""), LOGO_LARGE)
+            if logo:
+                self.quad_logos[quad_name].config(image=logo)
+            else:
+                self.quad_logos[quad_name].config(image="")
+        else:
+            self.quad_labels[quad_name].config(text="(empty)")
+            self.quad_logos[quad_name].config(image="")
+
     def _apply_restored_assignments(self):
         """Update the GUI labels to reflect restored assignments."""
         for quad_name, ch in self.assignments.items():
             if ch is not None:
-                self.quad_labels[quad_name].config(text=ch["name"])
+                self._update_quad_display(quad_name, ch)
 
     def _save_assignments(self):
         """Persist current quadrant assignments to disk."""
@@ -486,6 +592,32 @@ class QuadViewerApp:
             if ch is not None and ch in self.channels:
                 data[quad_name] = self.channels.index(ch)
         save_assignments(data)
+
+    # ---- Logo helpers -------------------------------------------------------
+
+    def _get_logo(self, logo_filename, size):
+        """Return a cached PhotoImage for the given logo file at the given size."""
+        if not logo_filename:
+            return None
+        cache = self._logo_small if size == LOGO_SMALL else self._logo_large
+        if logo_filename in cache:
+            return cache[logo_filename]
+        path = os.path.join(LOGOS_DIR, logo_filename)
+        if not os.path.isfile(path):
+            return None
+        try:
+            img = Image.open(path)
+            img.thumbnail((size, size), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(img)
+            cache[logo_filename] = photo
+            return photo
+        except Exception:
+            return None
+
+    def _invalidate_logo_cache(self, logo_filename):
+        """Remove a logo from caches so it gets reloaded next time."""
+        self._logo_small.pop(logo_filename, None)
+        self._logo_large.pop(logo_filename, None)
 
     # ---- GUI construction --------------------------------------------------
 
@@ -504,16 +636,25 @@ class QuadViewerApp:
         tree_frame.pack(fill=tk.BOTH, expand=True)
 
         self.channel_tree = ttk.Treeview(
-            tree_frame, columns=("name",), show="headings", selectmode="browse"
+            tree_frame, columns=("name",), show="tree headings", selectmode="browse"
         )
-        self.channel_tree.heading("name", text="Channel")
-        self.channel_tree.column("name", width=180)
+        self.channel_tree.heading("name", text="Channel", anchor="w")
+        self.channel_tree.column("#0", width=50, minwidth=50, stretch=False)  # logo icon
+        self.channel_tree.column("name", width=160, anchor="w")
+
+        # Row height to fit logo icons + bold left-aligned header
+        tree_style = ttk.Style()
+        tree_style.configure("Treeview", rowheight=max(28, LOGO_SMALL + 4))
+        tree_style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"), anchor="w")
         scrollbar = ttk.Scrollbar(
             tree_frame, orient=tk.VERTICAL, command=self.channel_tree.yview
         )
         self.channel_tree.configure(yscrollcommand=scrollbar.set)
         self.channel_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.channel_tree.tag_configure("drop_target", background="#b3d9ff")
+        self._drop_line = None  # Canvas line showing insertion point
 
         self._populate_tree()
 
@@ -543,6 +684,7 @@ class QuadViewerApp:
         grid_frame.pack(fill=tk.BOTH, expand=True)
 
         self.quad_labels = {}
+        self.quad_logos = {}    # quad_name -> ttk.Label for logo image
         self.quad_frames = {}
         positions = [
             ("Upper Left", 0, 0),
@@ -559,6 +701,10 @@ class QuadViewerApp:
             frame = ttk.LabelFrame(grid_frame, text=quad_name, padding=8)
             frame.grid(row=row, column=col, padx=4, pady=4, sticky="nsew")
             self.quad_frames[quad_name] = frame
+
+            logo_label = ttk.Label(frame, anchor="center")
+            logo_label.pack(pady=(0, 2))
+            self.quad_logos[quad_name] = logo_label
 
             label = ttk.Label(frame, text="(empty)", anchor="center", width=18)
             label.pack(pady=(0, 6))
@@ -616,7 +762,11 @@ class QuadViewerApp:
         for item in self.channel_tree.get_children():
             self.channel_tree.delete(item)
         for ch in self.channels:
-            self.channel_tree.insert("", tk.END, values=(ch["name"],))
+            logo = self._get_logo(ch.get("logo", ""), LOGO_SMALL)
+            if logo:
+                self.channel_tree.insert("", tk.END, values=(ch["name"],), image=logo)
+            else:
+                self.channel_tree.insert("", tk.END, values=(ch["name"],))
 
     # ---- Drag and drop -----------------------------------------------------
 
@@ -670,6 +820,38 @@ class QuadViewerApp:
 
         self._drag_indicator.geometry(f"+{abs_x + 14}+{abs_y + 10}")
 
+        # Highlight drop target row when reordering within the list
+        self._clear_drop_highlight()
+        if over_tree:
+            local_y = abs_y - self.channel_tree.winfo_rooty()
+            target_item = self.channel_tree.identify_row(local_y)
+            if target_item:
+                children = list(self.channel_tree.get_children())
+                target_idx = children.index(target_item)
+                if target_idx != self._drag_source_idx:
+                    self.channel_tree.item(target_item, tags=("drop_target",))
+                    # Draw insertion line
+                    bbox = self.channel_tree.bbox(target_item)
+                    if bbox:
+                        lx, ly, lw, lh = bbox
+                        if target_idx > self._drag_source_idx:
+                            line_y = ly + lh  # insert below
+                        else:
+                            line_y = ly  # insert above
+                        if self._drop_line is None:
+                            self._drop_line = tk.Toplevel(self.root)
+                            self._drop_line.overrideredirect(True)
+                            self._drop_line.attributes("-topmost", True)
+                            self._drop_line_canvas = tk.Canvas(
+                                self._drop_line, height=3, highlightthickness=0,
+                                bg="#0066cc"
+                            )
+                            self._drop_line_canvas.pack(fill=tk.X)
+                        line_abs_x = self.channel_tree.winfo_rootx() + lx
+                        line_abs_y = self.channel_tree.winfo_rooty() + line_y - 1
+                        self._drop_line.geometry(f"{lw}x3+{line_abs_x}+{line_abs_y}")
+                        self._drop_line.deiconify()
+
         for quad_name, frame in self.quad_frames.items():
             try:
                 if not over_tree:
@@ -717,18 +899,27 @@ class QuadViewerApp:
                 fh = frame.winfo_height()
                 if fx <= abs_x <= fx + fw and fy <= abs_y <= fy + fh:
                     self.assignments[quad_name] = self._drag_channel
-                    self.quad_labels[quad_name].config(
-                        text=self._drag_channel["name"]
-                    )
+                    self._update_quad_display(quad_name, self._drag_channel)
                     self._save_assignments()
                     break
 
         self._cleanup_drag()
 
+    def _clear_drop_highlight(self):
+        """Remove the row highlight and insertion line from the treeview."""
+        for item in self.channel_tree.get_children():
+            self.channel_tree.item(item, tags=())
+        if self._drop_line is not None:
+            self._drop_line.withdraw()
+
     def _cleanup_drag(self):
         self._drag_channel = None
         self._drag_source_idx = None
         self._drag_is_reorder = False
+        self._clear_drop_highlight()
+        if self._drop_line is not None:
+            self._drop_line.destroy()
+            self._drop_line = None
         if self._drag_indicator:
             self._drag_indicator.destroy()
             self._drag_indicator = None
@@ -766,13 +957,20 @@ class QuadViewerApp:
         self.root.wait_window(dlg)
         if dlg.result:
             old_name = self.channels[idx]["name"]
+            old_logo = self.channels[idx].get("logo", "")
             self.channels[idx] = dlg.result
             save_channels(self.channels)
+            # Invalidate logo cache if logo changed
+            new_logo = dlg.result.get("logo", "")
+            if old_logo:
+                self._invalidate_logo_cache(old_logo)
+            if new_logo:
+                self._invalidate_logo_cache(new_logo)
             self._populate_tree()
             for q, ch in self.assignments.items():
                 if ch and ch["name"] == old_name:
                     self.assignments[q] = dlg.result
-                    self.quad_labels[q].config(text=dlg.result["name"])
+                    self._update_quad_display(q, dlg.result)
             self._save_assignments()
 
     def _delete_channel(self):
@@ -793,7 +991,7 @@ class QuadViewerApp:
         for q, ch in self.assignments.items():
             if ch is removed:
                 self.assignments[q] = None
-                self.quad_labels[q].config(text="(empty)")
+                self._update_quad_display(q, None)
         self._save_assignments()
 
     # ---- Assignment logic ---------------------------------------------------
@@ -814,12 +1012,12 @@ class QuadViewerApp:
         if channel is None:
             return
         self.assignments[quad_name] = channel
-        self.quad_labels[quad_name].config(text=channel["name"])
+        self._update_quad_display(quad_name, channel)
         self._save_assignments()
 
     def _clear_quadrant(self, quad_name):
         self.assignments[quad_name] = None
-        self.quad_labels[quad_name].config(text="(empty)")
+        self._update_quad_display(quad_name, None)
         self._save_assignments()
 
     # ---- Launch / close ----------------------------------------------------
@@ -969,7 +1167,7 @@ class QuadViewerApp:
         self._update_audio_indicator()
 
     def _update_audio_indicator(self):
-        """Update quadrant labels to show which has audio."""
+        """Update quadrant labels to show which has audio (preserves logos)."""
         for quad_name, label in self.quad_labels.items():
             ch = self.assignments.get(quad_name)
             name = ch["name"] if ch else "(empty)"
@@ -977,6 +1175,11 @@ class QuadViewerApp:
                 label.config(text=f"{name}  \u266b")  # musical note
             else:
                 label.config(text=name)
+            # Refresh logo in case it was lost
+            if ch:
+                logo = self._get_logo(ch.get("logo", ""), LOGO_LARGE)
+                if logo:
+                    self.quad_logos[quad_name].config(image=logo)
 
     def _close_all(self):
         """Gracefully close Chrome windows so cookies/sessions are saved."""
@@ -1013,8 +1216,17 @@ class QuadViewerApp:
 # Entry point
 # ---------------------------------------------------------------------------
 def main():
+    # Set AppUserModelID so Windows shows our icon in the taskbar
+    # (without this, Python's default icon is used)
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("DevCon.QuadViewer.1")
+
     root = tk.Tk()
-    root.geometry("700x460")
+    root.geometry("700x540")
+
+    # Window / taskbar icon
+    ico_path = os.path.join(SCRIPT_DIR, "quadviewer.ico")
+    if os.path.isfile(ico_path):
+        root.iconbitmap(ico_path)
 
     style = ttk.Style()
     style.configure("Hover.TLabelframe", background="#d0e8ff")
