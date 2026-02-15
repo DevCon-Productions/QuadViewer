@@ -32,7 +32,7 @@
   {
     "name": "CBS",
     "url": "https://www.fubo.tv/p/watch?channelId%3D21320%26type%3Dlive",
-    "logo": "cbs.png"
+    "logo": "CBS.jpg"
   },
   {
     "name": "Fox Sports 1",
@@ -57,7 +57,7 @@
   {
     "name": "ABC News",
     "url": "https://www.fubo.tv/p/watch?channelId%3D127957%26type%3Dlive",
-    "logo": "abcnews.png"
+    "logo": "abcnews.jpg"
   },
   {
     "name": "NFL Network",
@@ -85,10 +85,6 @@
     "logo": "foxbusiness.png"
   },
   {
-    "name": "Discovery",
-    "url": ""
-  },
-  {
     "name": "Bloomberg",
     "url": "https://www.fubo.tv/p/watch?channelId%3D83287%26type%3Dlive",
     "logo": "bloomberg.png"
@@ -112,5 +108,30 @@
     "name": "SEC Network",
     "url": "https://www.fubo.tv/p/watch?channelId%3D102137%26type%3Dlive",
     "logo": "secnetwork.png"
+  },
+  {
+    "name": "Sky News",
+    "url": "https://www.youtube.com/watch?v=YDvsBbKfLPA",
+    "logo": "skynews.png"
+  },
+  {
+    "name": "Prime Video",
+    "url": "https://www.amazon.com/gp/video/storefront",
+    "logo": "primevideo.png"
+  },
+  {
+    "name": "Netflix",
+    "url": "https://www.netflix.com/browse",
+    "logo": "netflix.png"
+  },
+  {
+    "name": "Human Dilemma",
+    "url": "https://www.twitch.tv/humandilemma",
+    "logo": "humandilemma.png"
+  },
+  {
+    "name": "Reelz",
+    "url": "https://reelzplus.com/reelz-en/live-tv",
+    "logo": "reelz.png"
   }
 ]

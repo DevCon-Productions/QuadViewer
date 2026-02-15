@@ -152,6 +152,68 @@ def get_quadrant_rect(quad_name, work_x, work_y, work_w, work_h):
     return x, y, w, h
 
 
+def get_smart_rects(active_quads, work_x, work_y, work_w, work_h):
+    """Compute window rects based on how many quadrants are active.
+
+    1 window  -> full screen
+    2 windows -> side-by-side or stacked based on quadrant positions
+    3-4       -> standard quadrant layout
+    """
+    names = list(active_quads)
+    n = len(names)
+
+    if n == 1:
+        # Single window: full screen
+        return {names[0]: (
+            work_x - WIN_BORDER,
+            work_y - WIN_BORDER,
+            work_w + 2 * WIN_BORDER,
+            work_h + 2 * WIN_BORDER,
+        )}
+
+    if n == 2:
+        cols = [QUADRANTS[q][0] for q in names]
+        rows = [QUADRANTS[q][1] for q in names]
+
+        if rows[0] == rows[1]:
+            # Same row -> side by side, full height each
+            rects = {}
+            for q in names:
+                col = QUADRANTS[q][0]
+                x = work_x + col * (work_w // 2) - WIN_BORDER
+                y = work_y - WIN_BORDER
+                w = work_w // 2 + 2 * WIN_BORDER
+                h = work_h + 2 * WIN_BORDER
+                rects[q] = (x, y, w, h)
+            return rects
+
+        if cols[0] == cols[1]:
+            # Same column -> stacked, full width each
+            rects = {}
+            for q in names:
+                row = QUADRANTS[q][1]
+                x = work_x - WIN_BORDER
+                y = work_y + row * (work_h // 2) - WIN_BORDER
+                w = work_w + 2 * WIN_BORDER
+                h = work_h // 2 + 2 * WIN_BORDER
+                rects[q] = (x, y, w, h)
+            return rects
+
+        # Diagonal -> side by side, ordered left/right by column
+        rects = {}
+        sorted_names = sorted(names, key=lambda q: QUADRANTS[q][0])
+        for i, q in enumerate(sorted_names):
+            x = work_x + i * (work_w // 2) - WIN_BORDER
+            y = work_y - WIN_BORDER
+            w = work_w // 2 + 2 * WIN_BORDER
+            h = work_h + 2 * WIN_BORDER
+            rects[q] = (x, y, w, h)
+        return rects
+
+    # 3 or 4 windows: standard quadrant layout
+    return {q: get_quadrant_rect(q, work_x, work_y, work_w, work_h) for q in names}
+
+
 # ---------------------------------------------------------------------------
 # Chrome DevTools Protocol — minimal WebSocket client (stdlib only)
 # ---------------------------------------------------------------------------
@@ -308,6 +370,8 @@ INJECTED_JS = r"""
   const PROFILE = "__PROFILE__";
   const isFubo = location.hostname.includes("fubo.tv");
   const isSpectrum = location.hostname.includes("spectrum.net");
+  const isYouTube = location.hostname.includes("youtube.com");
+  const isTwitch = location.hostname.includes("twitch.tv");
   let profileDone = false;
   let overlayDone = false;
   let attempts = 0;
@@ -358,37 +422,131 @@ INJECTED_JS = r"""
     return false;
   }
 
-  // --- Spectrum overlay: click #modal-close ---
+  // --- Spectrum: dismiss modal and channel guide ---
   function dismissSpectrumOverlay() {
+    var dismissed = false;
+    // Close modal popup
     var closeBtn = document.querySelector("#modal-close");
     if (closeBtn) {
       closeBtn.dispatchEvent(new MouseEvent("mousedown", {bubbles:true}));
       closeBtn.dispatchEvent(new MouseEvent("mouseup", {bubbles:true}));
       closeBtn.click();
-      return true;
+      dismissed = true;
     }
-    return false;
+    // Close channel guide sidebar — try common selectors and Escape key
+    var guideSelectors = [
+      ".guide-close", "[class*='guide'] [class*='close']",
+      "[class*='channel-guide'] [class*='close']",
+      "[aria-label='Close']", "[aria-label='Close Guide']",
+      ".sidebar-close", "[class*='sidebar'] [class*='close']",
+    ];
+    for (var i = 0; i < guideSelectors.length; i++) {
+      var el = document.querySelector(guideSelectors[i]);
+      if (el && el.offsetParent !== null) {
+        el.click();
+        dismissed = true;
+        break;
+      }
+    }
+    // Press Escape to dismiss any overlay/guide
+    sendKey("Escape", "Escape", 27);
+    // Click the video player area to ensure focus and dismiss guide
+    var video = document.querySelector("video");
+    if (video && video.offsetParent !== null) {
+      video.click();
+      dismissed = true;
+    }
+    return dismissed;
   }
 
   function handleProfile() {
+    // Only attempt profile selection on streaming TV sites
     if (isFubo) {
       if (fuboSelectProfile()) return true;
       return clickProfileElement();
     }
     if (isSpectrum) return clickProfileElement();
-    return clickProfileElement();
+    // Skip profile click on other sites (Amazon, Netflix, Twitch, YouTube, etc.)
+    return false;
+  }
+
+  // --- YouTube: hide everything except the video player ---
+  function youtubeCleanup() {
+    if (!isYouTube) return false;
+    var style = document.getElementById("__qv_yt_style");
+    if (style) return true;
+    style = document.createElement("style");
+    style.id = "__qv_yt_style";
+    style.textContent = [
+      "ytd-masthead, #masthead, #masthead-container { display:none !important; }",
+      "#secondary, #related, #comments, #chat, ytd-live-chat-frame { display:none !important; }",
+      "#meta, #info, #below, ytd-watch-metadata { display:none !important; }",
+      "#page-manager { margin-top:0 !important; }",
+      "ytd-watch-flexy { --ytd-watch-flexy-panel-max-height:0px !important; }",
+      "#columns { max-width:100% !important; }",
+      "#primary { max-width:100% !important; width:100% !important; }",
+      "#player-container-outer, #player-container-inner, #ytd-player, .html5-video-container, video {",
+      "  width:100vw !important; height:100vh !important; max-width:100vw !important; max-height:100vh !important;",
+      "}",
+      "#movie_player { width:100vw !important; height:100vh !important; position:fixed !important; top:0 !important; left:0 !important; z-index:9999 !important; }",
+      ".ytp-chrome-bottom { opacity:0; transition:opacity .3s; }",
+      "#movie_player:hover .ytp-chrome-bottom { opacity:1; }",
+    ].join("\n");
+    document.head.appendChild(style);
+    // Click the video to dismiss any overlay / start playback
+    var vid = document.querySelector("video");
+    if (vid) vid.click();
+    return true;
+  }
+
+  // --- Twitch: hide everything except the video player ---
+  function twitchCleanup() {
+    if (!isTwitch) return false;
+    var style = document.getElementById("__qv_tw_style");
+    if (style) return true;
+    style = document.createElement("style");
+    style.id = "__qv_tw_style";
+    style.textContent = [
+      "nav, .top-nav, .channel-header, .stream-chat, .chat-shell, .right-column, .side-nav { display:none !important; }",
+      "[class*='side-nav'], [class*='channel-info'], [class*='metadata-layout'] { display:none !important; }",
+      "[class*='chat-room'], [class*='right-column'], [class*='community-points'] { display:none !important; }",
+      "[data-a-target='right-column-chat-bar'] { display:none !important; }",
+      ".persistent-player, .video-player, .video-player__container, video {",
+      "  width:100vw !important; height:100vh !important; max-width:100vw !important; max-height:100vh !important;",
+      "  position:fixed !important; top:0 !important; left:0 !important; z-index:9999 !important;",
+      "}",
+      "[class*='video-player__overlay'] { opacity:0; transition:opacity .3s; }",
+      ".video-player:hover [class*='video-player__overlay'] { opacity:1; }",
+    ].join("\n");
+    document.head.appendChild(style);
+    return true;
   }
 
   function handleOverlay() {
     if (isSpectrum) return dismissSpectrumOverlay();
+    if (isYouTube) return youtubeCleanup();
+    if (isTwitch) return twitchCleanup();
     return false;
+  }
+
+  // --- Universal autoplay: force-play any paused video elements ---
+  function ensurePlayback() {
+    var vids = document.querySelectorAll("video");
+    for (var i = 0; i < vids.length; i++) {
+      if (vids[i].paused && vids[i].readyState >= 2) {
+        try { vids[i].play(); } catch(e) {}
+      }
+    }
   }
 
   var timer = setInterval(function() {
     attempts++;
     if (!profileDone && handleProfile()) profileDone = true;
     if (!overlayDone && handleOverlay()) overlayDone = true;
-    if ((profileDone && overlayDone) || attempts >= 60) clearInterval(timer);
+    ensurePlayback();
+    // For Spectrum, keep retrying overlay dismissal longer (guide can appear late)
+    var done = profileDone && (overlayDone || isSpectrum ? attempts >= 30 : overlayDone);
+    if (done || attempts >= 60) clearInterval(timer);
   }, 1000);
 })();
 """.replace("__PROFILE__", PROFILE_NAME)
@@ -398,16 +556,17 @@ def inject_js_thread(port):
     # First injection: as soon as Chrome is reachable
     cdp_evaluate(port, INJECTED_JS)
     # Re-inject after delays to catch pages that navigate/redirect
-    for delay in (10, 15):
-        time.sleep(delay)
+    for wait in (8, 12, 15, 20):
+        time.sleep(wait)
         cdp_evaluate(port, INJECTED_JS, retries=3, delay=1)
 
 
 def unpause_thread(port, win_w, win_h):
-    """Background thread: click center of video at 20s to unpause."""
-    time.sleep(20)
-    # Click center of the viewport to toggle play
-    cdp_mouse_click(port, win_w // 2, win_h // 2)
+    """Background thread: click center of video multiple times to dismiss play overlays."""
+    cx, cy = win_w // 2, win_h // 2
+    for wait in (15, 10, 10, 10):
+        time.sleep(wait)
+        cdp_mouse_click(port, cx, cy)
 
 
 # ---------------------------------------------------------------------------
@@ -534,6 +693,7 @@ class QuadViewerApp:
         self.processes = []
         self.active_ports = {}        # quad_name -> CDP debug port
         self.audio_quad = "Upper Left"  # currently unmuted quadrant
+        self.block_spectrum_iha = tk.BooleanVar(value=True)  # block IHA by default
 
         # Logo image caches (keep references so tkinter doesn't GC them)
         self._logo_small = {}   # logo filename -> PhotoImage (24x24)
@@ -702,16 +862,16 @@ class QuadViewerApp:
             frame.grid(row=row, column=col, padx=4, pady=4, sticky="nsew")
             self.quad_frames[quad_name] = frame
 
-            logo_label = ttk.Label(frame, anchor="center")
-            logo_label.pack(pady=(0, 2))
-            self.quad_logos[quad_name] = logo_label
+            btn_frame = ttk.Frame(frame)
+            btn_frame.pack(side=tk.BOTTOM, pady=(6, 0))
 
             label = ttk.Label(frame, text="(empty)", anchor="center", width=18)
-            label.pack(pady=(0, 6))
-            self.quad_labels[quad_name] = label
+            label.pack(side=tk.BOTTOM, pady=(0, 2))
 
-            btn_frame = ttk.Frame(frame)
-            btn_frame.pack()
+            logo_label = ttk.Label(frame, anchor="center")
+            logo_label.pack(side=tk.TOP, pady=(2, 0))
+            self.quad_logos[quad_name] = logo_label
+            self.quad_labels[quad_name] = label
             ttk.Button(
                 btn_frame,
                 text="Set",
@@ -722,12 +882,23 @@ class QuadViewerApp:
                 text="Clear",
                 command=lambda q=quad_name: self._clear_quadrant(q),
             ).pack(side=tk.LEFT, padx=2)
+            ttk.Button(
+                btn_frame,
+                text="Front",
+                command=lambda q=quad_name: self._bring_quad_to_front(q),
+            ).pack(side=tk.LEFT, padx=2)
 
         # Bottom controls
         controls = ttk.Frame(right_frame, padding=(0, 8, 0, 0))
         controls.pack(fill=tk.X)
 
         ttk.Button(controls, text="Execute", command=self._execute).pack(
+            side=tk.LEFT, padx=4
+        )
+        ttk.Button(controls, text="Clear All", command=self._clear_all_quadrants).pack(
+            side=tk.LEFT, padx=4
+        )
+        ttk.Button(controls, text="Bring to Front", command=self._bring_to_front).pack(
             side=tk.LEFT, padx=4
         )
         ttk.Button(controls, text="Close All", command=self._close_all).pack(
@@ -757,6 +928,12 @@ class QuadViewerApp:
         self.root.bind("2", lambda e: self._set_audio_solo("Upper Right"))
         self.root.bind("3", lambda e: self._set_audio_solo("Lower Left"))
         self.root.bind("4", lambda e: self._set_audio_solo("Lower Right"))
+
+        # Spectrum IHA toggle
+        ttk.Checkbutton(
+            right_frame, text="Block Spectrum auto-login (use saved account)",
+            variable=self.block_spectrum_iha,
+        ).pack(fill=tk.X, pady=(6, 0))
 
     def _populate_tree(self):
         for item in self.channel_tree.get_children():
@@ -1020,6 +1197,37 @@ class QuadViewerApp:
         self._update_quad_display(quad_name, None)
         self._save_assignments()
 
+    def _clear_all_quadrants(self):
+        for quad_name in QUADRANTS:
+            self.assignments[quad_name] = None
+            self._update_quad_display(quad_name, None)
+        self._save_assignments()
+
+    # ---- Window management --------------------------------------------------
+
+    def _bring_to_front(self):
+        """Bring all Chrome windows to the foreground via CDP."""
+        if not self.active_ports:
+            return
+        for port in self.active_ports.values():
+            threading.Thread(
+                target=cdp_send,
+                args=(port, "Page.bringToFront", {}),
+                kwargs={"retries": 2, "delay": 1},
+                daemon=True,
+            ).start()
+
+    def _bring_quad_to_front(self, quad_name):
+        """Bring a single quadrant's Chrome window to the foreground."""
+        port = self.active_ports.get(quad_name)
+        if port:
+            threading.Thread(
+                target=cdp_send,
+                args=(port, "Page.bringToFront", {}),
+                kwargs={"retries": 2, "delay": 1},
+                daemon=True,
+            ).start()
+
     # ---- Launch / close ----------------------------------------------------
 
     def _get_profile_dir(self, quad_name):
@@ -1049,6 +1257,8 @@ class QuadViewerApp:
         self._close_all()
         self.active_ports.clear()
 
+        rects = get_smart_rects(active, work_x, work_y, work_w, work_h)
+
         for quad_name, channel in active.items():
             url = channel.get("url", "")
             if not url:
@@ -1059,7 +1269,7 @@ class QuadViewerApp:
                 )
                 continue
 
-            x, y, w, h = get_quadrant_rect(quad_name, work_x, work_y, work_w, work_h)
+            x, y, w, h = rects[quad_name]
             profile_dir = self._get_profile_dir(quad_name)
             debug_port = CDP_BASE_PORT + CDP_PORT_OFFSETS[quad_name]
             self.active_ports[quad_name] = debug_port
@@ -1075,6 +1285,16 @@ class QuadViewerApp:
                 "--no-first-run",
                 "--no-default-browser-check",
             ]
+
+            # Block Spectrum in-home authentication (IP-based auto-login)
+            # so the saved session cookies for the desired account persist
+            if "spectrum.net" in url and self.block_spectrum_iha.get():
+                cmd.append(
+                    "--host-rules="
+                    "MAP login.spectrum.net 0.0.0.0,"
+                    "MAP idp.spectrum.net 0.0.0.0"
+                )
+                cmd.append("--test-type")  # suppress "unsupported flag" banner
 
             proc = subprocess.Popen(cmd)
             self.processes.append(proc)
