@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 assignments.json
 extension/
+settings.json
+build/
+dist/
+installer_output/
+.claude/

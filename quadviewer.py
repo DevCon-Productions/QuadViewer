@@ -8,28 +8,46 @@ then launches borderless Chrome windows for each.
 import base64
 import ctypes
 import ctypes.wintypes
+from datetime import datetime, timedelta, timezone
 import http.client
 import json
 import os
 import socket
 import struct
 import subprocess
+import sys
 import threading
 import time
 import shutil
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
+import urllib.request
+import urllib.error
 
 from PIL import Image, ImageTk
+import ttkbootstrap as tbs
+from ttkbootstrap.constants import *
 
 # ---------------------------------------------------------------------------
 # Paths & constants
 # ---------------------------------------------------------------------------
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# When frozen by PyInstaller, data files are in sys._MEIPASS/_internal;
+# otherwise use the script's own directory.
+if getattr(sys, "frozen", False):
+    SCRIPT_DIR = os.path.dirname(sys.executable)
+    _DATA_DIR = sys._MEIPASS
+else:
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    _DATA_DIR = SCRIPT_DIR
+# User-writable files live next to the exe (or script); read-only bundled
+# data (logos, icon, default configs) lives in _DATA_DIR.
 CHANNELS_FILE = os.path.join(SCRIPT_DIR, "channels.json")
 ASSIGNMENTS_FILE = os.path.join(SCRIPT_DIR, "assignments.json")
+PRESETS_FILE = os.path.join(SCRIPT_DIR, "presets.json")
+SETTINGS_FILE = os.path.join(SCRIPT_DIR, "settings.json")
 PROFILES_DIR = os.path.join(SCRIPT_DIR, "profiles")
-LOGOS_DIR = os.path.join(SCRIPT_DIR, "logos")
+LOGOS_DIR = os.path.join(_DATA_DIR, "logos")
+ICO_PATH = os.path.join(_DATA_DIR, "quadviewer.ico")
 
 # Logo display sizes (pixels)
 LOGO_SMALL = 24   # channel list
@@ -59,6 +77,29 @@ CDP_PORT_OFFSETS = {
 
 # Profile name to auto-select on Fubo / Spectrum
 PROFILE_NAME = "Devon"
+
+
+def _copy_default_data():
+    """On first run from a frozen build, copy bundled data files to SCRIPT_DIR."""
+    if _DATA_DIR == SCRIPT_DIR:
+        return
+    for fname in ("channels.json", "presets.json"):
+        dest = os.path.join(SCRIPT_DIR, fname)
+        if not os.path.isfile(dest):
+            src = os.path.join(_DATA_DIR, fname)
+            if os.path.isfile(src):
+                shutil.copy2(src, dest)
+
+_copy_default_data()
+
+
+def _set_icon(window):
+    """Set the QuadViewer icon on a Toplevel window."""
+    if os.path.isfile(ICO_PATH):
+        try:
+            window.iconbitmap(ICO_PATH)
+        except Exception:
+            pass
 
 
 def find_chrome():
@@ -91,6 +132,33 @@ def save_assignments(assignments):
     """Save quadrant->channel mapping. Stores channel index for each quadrant."""
     with open(ASSIGNMENTS_FILE, "w", encoding="utf-8") as f:
         json.dump(assignments, f, indent=2, ensure_ascii=False)
+
+
+def load_presets():
+    if not os.path.isfile(PRESETS_FILE):
+        return []
+    with open(PRESETS_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_presets(presets):
+    with open(PRESETS_FILE, "w", encoding="utf-8") as f:
+        json.dump(presets, f, indent=2, ensure_ascii=False)
+
+
+def load_settings():
+    if not os.path.isfile(SETTINGS_FILE):
+        return {}
+    with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_settings(settings):
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(settings, f, indent=2, ensure_ascii=False)
+
+
+DEFAULT_THEME = "darkly"
 
 
 # ---------------------------------------------------------------------------
@@ -330,11 +398,12 @@ def cdp_send(port, method, params, retries=15, delay=2):
     return False
 
 
-def cdp_evaluate(port, js_code, retries=15, delay=2):
+def cdp_evaluate(port, js_code, retries=15, delay=2, user_gesture=False):
     """Evaluate JavaScript via CDP Runtime.evaluate."""
-    return cdp_send(port, "Runtime.evaluate",
-                    {"expression": js_code, "awaitPromise": False},
-                    retries, delay)
+    params = {"expression": js_code, "awaitPromise": False}
+    if user_gesture:
+        params["userGesture"] = True
+    return cdp_send(port, "Runtime.evaluate", params, retries, delay)
 
 
 def cdp_press_key(port, key=" ", code="Space", key_code=32):
@@ -358,6 +427,150 @@ def cdp_mouse_click(port, x, y):
              {**base, "type": "mousePressed"}, retries=3, delay=1)
     cdp_send(port, "Input.dispatchMouseEvent",
              {**base, "type": "mouseReleased"}, retries=3, delay=1)
+
+
+def cdp_set_window_bounds(port, left, top, width, height, retries=5, delay=1):
+    """Move/resize the Chrome window via CDP Browser.setWindowBounds."""
+    for attempt in range(retries):
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.request("GET", "/json/list")
+            resp = conn.getresponse()
+            targets = json.loads(resp.read())
+            conn.close()
+
+            page = None
+            for t in targets:
+                if t.get("type") == "page":
+                    page = t
+                    break
+            if page is None:
+                time.sleep(delay)
+                continue
+
+            target_id = page.get("id", "")
+            ws_url = page.get("webSocketDebuggerUrl", "")
+            if not ws_url or not target_id:
+                time.sleep(delay)
+                continue
+
+            stripped = ws_url.replace("ws://", "")
+            slash = stripped.find("/")
+            host_port = stripped[:slash] if slash != -1 else stripped
+            path = stripped[slash:] if slash != -1 else "/"
+            ws_host, ws_port = host_port.split(":")
+
+            sock = socket.create_connection((ws_host, int(ws_port)), timeout=10)
+            key = base64.b64encode(os.urandom(16)).decode()
+            handshake = (
+                f"GET {path} HTTP/1.1\r\n"
+                f"Host: {host_port}\r\n"
+                f"Upgrade: websocket\r\n"
+                f"Connection: Upgrade\r\n"
+                f"Sec-WebSocket-Key: {key}\r\n"
+                f"Sec-WebSocket-Version: 13\r\n"
+                f"\r\n"
+            )
+            sock.sendall(handshake.encode())
+
+            buf = b""
+            while b"\r\n\r\n" not in buf:
+                buf += sock.recv(4096)
+            if b"101" not in buf:
+                sock.close()
+                time.sleep(delay)
+                continue
+
+            # Get windowId for this target
+            msg = json.dumps({
+                "id": 1, "method": "Browser.getWindowForTarget",
+                "params": {"targetId": target_id},
+            })
+            _ws_send_text(sock, msg)
+            resp_text = _ws_recv(sock, timeout=5)
+            if not resp_text:
+                sock.close()
+                time.sleep(delay)
+                continue
+
+            resp_data = json.loads(resp_text)
+            window_id = resp_data.get("result", {}).get("windowId")
+            if window_id is None:
+                sock.close()
+                time.sleep(delay)
+                continue
+
+            # Set new window bounds
+            msg = json.dumps({
+                "id": 2, "method": "Browser.setWindowBounds",
+                "params": {
+                    "windowId": window_id,
+                    "bounds": {
+                        "left": left, "top": top,
+                        "width": width, "height": height,
+                        "windowState": "normal",
+                    },
+                },
+            })
+            _ws_send_text(sock, msg)
+            _ws_recv(sock, timeout=5)
+
+            sock.close()
+            return True
+
+        except Exception:
+            time.sleep(delay)
+
+    return False
+
+
+def bring_os_window_to_front(pid):
+    """Bring a Chrome window to the OS foreground by process ID.
+
+    Uses SetWindowPos with HWND_TOPMOST/NOTOPMOST which is more reliable
+    than SetForegroundWindow (which Windows blocks from background threads).
+    """
+    try:
+        user32 = ctypes.windll.user32
+        WNDENUMPROC = ctypes.WINFUNCTYPE(
+            ctypes.wintypes.BOOL, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM
+        )
+
+        found_hwnd = ctypes.wintypes.HWND(0)
+        target_pid = ctypes.wintypes.DWORD()
+
+        def enum_cb(hwnd, _):
+            nonlocal found_hwnd
+            # Only consider visible windows
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(target_pid))
+            if target_pid.value == pid:
+                found_hwnd = hwnd
+                return False  # stop enumeration
+            return True
+
+        user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+
+        if found_hwnd:
+            SW_RESTORE = 9
+            if user32.IsIconic(found_hwnd):
+                user32.ShowWindow(found_hwnd, SW_RESTORE)
+            # SetWindowPos TOPMOST then NOTOPMOST — reliably brings to front
+            # without making the window permanently always-on-top
+            HWND_TOPMOST = ctypes.wintypes.HWND(-1)
+            HWND_NOTOPMOST = ctypes.wintypes.HWND(-2)
+            SWP_NOMOVE = 0x0002
+            SWP_NOSIZE = 0x0001
+            flags = SWP_NOMOVE | SWP_NOSIZE
+            user32.SetWindowPos(found_hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags)
+            user32.SetWindowPos(found_hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags)
+            user32.SetForegroundWindow(found_hwnd)
+            return True
+
+    except Exception:
+        pass
+    return False
 
 
 # The JavaScript to inject into each Chrome page.
@@ -448,13 +661,9 @@ INJECTED_JS = r"""
         break;
       }
     }
-    // Press Escape to dismiss any overlay/guide
-    sendKey("Escape", "Escape", 27);
-    // Click the video player area to ensure focus and dismiss guide
-    var video = document.querySelector("video");
-    if (video && video.offsetParent !== null) {
-      video.click();
-      dismissed = true;
+    // Press Escape once to dismiss any overlay/guide (only early on)
+    if (attempts <= 10) {
+      sendKey("Escape", "Escape", 27);
     }
     return dismissed;
   }
@@ -529,8 +738,23 @@ INJECTED_JS = r"""
     return false;
   }
 
+  // --- Spectrum: block video.pause() entirely ---
+  // Live TV should never pause.  Override the pause method so that
+  // resize / visibility-change / player-internal logic cannot stop playback.
+  // Buffering still works (that fires 'waiting', not pause()).
+  if (isSpectrum) {
+    var _origPause = HTMLVideoElement.prototype.pause;
+    HTMLVideoElement.prototype.pause = function() {
+      // no-op — live TV should never pause
+      return undefined;
+    };
+  }
+
   // --- Universal autoplay: force-play any paused video elements ---
+  // Skip Spectrum — its player interprets play() as user interaction and
+  // shows the control panel / chromecast banner.  The guard above handles it.
   function ensurePlayback() {
+    if (isSpectrum) return;
     var vids = document.querySelectorAll("video");
     for (var i = 0; i < vids.length; i++) {
       if (vids[i].paused && vids[i].readyState >= 2) {
@@ -551,22 +775,166 @@ INJECTED_JS = r"""
 })();
 """.replace("__PROFILE__", PROFILE_NAME)
 
-def inject_js_thread(port):
+MUTE_ALL_JS = "document.querySelectorAll('video, audio').forEach(function(el){el.muted=true;});"
+RESUME_VIDEO_JS = "document.querySelectorAll('video').forEach(function(v){if(v.paused)try{v.play()}catch(e){}});"
+
+
+def inject_js_thread(port, start_muted=False):
     """Background thread: inject JS multiple times to survive page navigations."""
     # First injection: as soon as Chrome is reachable
     cdp_evaluate(port, INJECTED_JS)
+    if start_muted:
+        cdp_evaluate(port, MUTE_ALL_JS, retries=2, delay=1)
     # Re-inject after delays to catch pages that navigate/redirect
     for wait in (8, 12, 15, 20):
         time.sleep(wait)
         cdp_evaluate(port, INJECTED_JS, retries=3, delay=1)
+        if start_muted:
+            cdp_evaluate(port, MUTE_ALL_JS, retries=1, delay=1)
 
 
-def unpause_thread(port, win_w, win_h):
-    """Background thread: click center of video multiple times to dismiss play overlays."""
+def unpause_thread(port, win_w, win_h, url=""):
+    """Background thread: click center of video multiple times to dismiss play overlays.
+    Skips Spectrum — clicking the video area triggers its channel guide sidebar.
+    """
+    if "spectrum.net" in url:
+        return
     cx, cy = win_w // 2, win_h // 2
     for wait in (15, 10, 10, 10):
         time.sleep(wait)
         cdp_mouse_click(port, cx, cy)
+
+
+# ---------------------------------------------------------------------------
+# TV schedule cache (TVGuide backend API)
+# ---------------------------------------------------------------------------
+TVGUIDE_API_HOST = "backend.tvguide.com"
+TVGUIDE_PROVIDER_ID = "9100001138"  # Eastern - National Listings
+
+_schedule_cache = {
+    "timestamp": 0,         # last fetch unix time
+    "data": {},             # tvguide_name (e.g. "ESPN") -> list of {title, start, end}
+    "fetching": False,
+}
+
+
+def _fmt_time(dt):
+    """Format a datetime as '3:00 PM' style local time."""
+    if dt is None:
+        return ""
+    return dt.strftime("%I:%M %p").lstrip("0")
+
+
+def _fetch_schedule():
+    """Fetch current TV schedule from TVGuide backend API."""
+    now_ts = int(time.time())
+    # Re-fetch at most every 10 minutes
+    if _schedule_cache["data"] and now_ts - _schedule_cache["timestamp"] < 600:
+        return
+    if _schedule_cache["fetching"]:
+        return
+    _schedule_cache["fetching"] = True
+    try:
+        url = (
+            f"https://{TVGUIDE_API_HOST}/tvschedules/tvguide/"
+            f"{TVGUIDE_PROVIDER_ID}/web?start={now_ts}&duration=240"
+        )
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json",
+        })
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = json.loads(resp.read().decode("utf-8"))
+        items = raw.get("data", {}).get("items", [])
+        by_name = {}
+        for item in items:
+            ch = item.get("channel", {})
+            ch_name = ch.get("name", "")
+            if not ch_name:
+                continue
+            schedules = item.get("programSchedules", [])
+            entries = []
+            for s in schedules:
+                start_dt = datetime.fromtimestamp(s["startTime"]).astimezone()
+                end_dt = datetime.fromtimestamp(s["endTime"]).astimezone()
+                entries.append({
+                    "title": s.get("title", "Unknown"),
+                    "start": start_dt,
+                    "end": end_dt,
+                })
+            entries.sort(key=lambda e: e["start"])
+            by_name[ch_name] = entries
+        _schedule_cache["data"] = by_name
+        _schedule_cache["timestamp"] = now_ts
+    except Exception:
+        pass
+    finally:
+        _schedule_cache["fetching"] = False
+
+
+def get_current_show(tvguide_name):
+    """Return info about what's currently airing on a channel, or None."""
+    if not tvguide_name:
+        return None
+    # Auto-refresh if cache is stale
+    now_ts = int(time.time())
+    if now_ts - _schedule_cache["timestamp"] > 600 and not _schedule_cache["fetching"]:
+        threading.Thread(target=_fetch_schedule, daemon=True).start()
+    if not _schedule_cache["data"]:
+        return None
+    episodes = _schedule_cache["data"].get(tvguide_name, [])
+    if not episodes:
+        return None
+    now = datetime.now().astimezone()
+    current = None
+    next_show = None
+    for ep in episodes:
+        if ep["start"] <= now < ep["end"]:
+            current = ep
+        elif ep["start"] > now and next_show is None:
+            next_show = ep
+    if current:
+        lines = [f"Now: {current['title']}"]
+        lines.append(f"  {_fmt_time(current['start'])} - {_fmt_time(current['end'])}")
+        if next_show:
+            lines.append(f"Next: {next_show['title']} ({_fmt_time(next_show['start'])})")
+        return "\n".join(lines)
+    elif next_show:
+        return f"Next: {next_show['title']} at {_fmt_time(next_show['start'])}"
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Hover Tooltip
+# ---------------------------------------------------------------------------
+class ToolTip(tk.Toplevel):
+    """A floating tooltip window that follows the cursor near a widget."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        self._label = tk.Label(
+            self,
+            justify=tk.LEFT,
+            background="#2d2d2d",
+            foreground="#e0e0e0",
+            relief="solid",
+            borderwidth=1,
+            font=("Segoe UI", 9),
+            padx=6,
+            pady=4,
+        )
+        self._label.pack()
+        self.withdraw()
+
+    def show(self, text, x, y):
+        self._label.config(text=text)
+        self.geometry(f"+{x + 16}+{y + 10}")
+        self.deiconify()
+
+    def hide(self):
+        self.withdraw()
 
 
 # ---------------------------------------------------------------------------
@@ -577,6 +945,7 @@ class ChannelDialog(tk.Toplevel):
 
     def __init__(self, parent, title="Channel", channel=None):
         super().__init__(parent)
+        _set_icon(self)
         self.title(title)
         self.resizable(False, False)
         self.grab_set()
@@ -610,8 +979,13 @@ class ChannelDialog(tk.Toplevel):
         self._update_logo_preview()
         self.logo_var.trace_add("write", lambda *_: self._update_logo_preview())
 
+        # TVGuide channel name (optional, for programming guide)
+        ttk.Label(self, text="TVGuide Name:").grid(row=4, column=0, sticky="w", **pad)
+        self.tvguide_var = tk.StringVar(value=channel.get("tvguide_name", "") if channel else "")
+        ttk.Entry(self, textvariable=self.tvguide_var, width=20).grid(row=4, column=1, sticky="w", **pad)
+
         btn_frame = ttk.Frame(self)
-        btn_frame.grid(row=4, column=0, columnspan=2, pady=10)
+        btn_frame.grid(row=5, column=0, columnspan=2, pady=10)
         ttk.Button(btn_frame, text="OK", command=self._ok).pack(side=tk.LEFT, padx=6)
         ttk.Button(btn_frame, text="Cancel", command=self.destroy).pack(side=tk.LEFT, padx=6)
 
@@ -671,11 +1045,15 @@ class ChannelDialog(tk.Toplevel):
         if not name:
             messagebox.showwarning("Missing Name", "Channel name is required.", parent=self)
             return
-        self.result = {
+        result = {
             "name": name,
             "url": self.url_var.get().strip(),
             "logo": self.logo_var.get().strip(),
         }
+        tvg = self.tvguide_var.get().strip()
+        if tvg:
+            result["tvguide_name"] = tvg
+        self.result = result
         self.destroy()
 
 
@@ -685,15 +1063,25 @@ class ChannelDialog(tk.Toplevel):
 class QuadViewerApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("QuadViewer")
+        self.root.title("DevCon QuadViewer")
         self.root.resizable(True, True)
 
         self.channels = load_channels()
         self.assignments = {name: None for name in QUADRANTS}
         self.processes = []
         self.active_ports = {}        # quad_name -> CDP debug port
+        self.active_pids = {}         # quad_name -> Chrome process ID
         self.audio_quad = "Upper Left"  # currently unmuted quadrant
         self.block_spectrum_iha = tk.BooleanVar(value=True)  # block IHA by default
+
+        self._ctrl9_showing_app = False  # toggle state for Ctrl+9
+
+        # Window maximize state tracking
+        self._quad_rects = {}       # quad_name -> (x, y, w, h) original rect
+        self._quad_maximized = {}   # quad_name -> bool
+
+        # Presets
+        self.presets = load_presets()
 
         # Logo image caches (keep references so tkinter doesn't GC them)
         self._logo_small = {}   # logo filename -> PhotoImage (24x24)
@@ -711,6 +1099,9 @@ class QuadViewerApp:
         self._build_gui()
         self._apply_restored_assignments()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Fetch TV schedule in background for hover tooltips
+        threading.Thread(target=_fetch_schedule, daemon=True).start()
 
         # Global hotkeys (Ctrl+1..4) — work even when QuadViewer isn't focused
         self._hotkey_thread = threading.Thread(
@@ -782,6 +1173,19 @@ class QuadViewerApp:
     # ---- GUI construction --------------------------------------------------
 
     def _build_gui(self):
+        # Menu bar
+        menubar = tk.Menu(self.root)
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="Help", command=self._show_help)
+        help_menu.add_command(label="YouTube Tutorial", command=self._open_youtube_tutorial)
+        help_menu.add_separator()
+        help_menu.add_command(label="About", command=self._show_about)
+        options_menu = tk.Menu(menubar, tearoff=0)
+        options_menu.add_command(label="Preferences...", command=self._show_preferences)
+        menubar.add_cascade(label="Options", menu=options_menu)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        self.root.config(menu=menubar)
+
         main = ttk.Frame(self.root)
         main.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
         main.columnconfigure(0, weight=1)
@@ -796,15 +1200,15 @@ class QuadViewerApp:
         tree_frame.pack(fill=tk.BOTH, expand=True)
 
         self.channel_tree = ttk.Treeview(
-            tree_frame, columns=("name",), show="tree headings", selectmode="browse"
+            tree_frame, columns=("name",), show="tree", selectmode="browse"
         )
         self.channel_tree.heading("name", text="Channel", anchor="w")
         self.channel_tree.column("#0", width=50, minwidth=50, stretch=False)  # logo icon
         self.channel_tree.column("name", width=160, anchor="w")
 
         # Row height to fit logo icons + bold left-aligned header
-        tree_style = ttk.Style()
-        tree_style.configure("Treeview", rowheight=max(28, LOGO_SMALL + 4))
+        tree_style = self.root.style
+        tree_style.configure("Treeview", rowheight=LOGO_SMALL + 10)
         tree_style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"), anchor="w")
         scrollbar = ttk.Scrollbar(
             tree_frame, orient=tk.VERTICAL, command=self.channel_tree.yview
@@ -813,7 +1217,7 @@ class QuadViewerApp:
         self.channel_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        self.channel_tree.tag_configure("drop_target", background="#b3d9ff")
+        self.channel_tree.tag_configure("drop_target", background="#1a3a5c")
         self._drop_line = None  # Canvas line showing insertion point
 
         self._populate_tree()
@@ -836,6 +1240,12 @@ class QuadViewerApp:
         self.channel_tree.bind("<B1-Motion>", self._drag_motion)
         self.channel_tree.bind("<ButtonRelease-1>", self._drag_drop)
 
+        # Tooltip for showing current programming on hover
+        self._tooltip = ToolTip(self.root)
+        self._tooltip_item = None
+        self.channel_tree.bind("<Motion>", self._on_tree_hover)
+        self.channel_tree.bind("<Leave>", self._on_tree_leave)
+
         # ----- Right panel: quadrant grid + controls -----
         right_frame = ttk.Frame(main, padding=4)
         right_frame.grid(row=0, column=1, sticky="nsew", padx=(3, 0))
@@ -846,6 +1256,7 @@ class QuadViewerApp:
         self.quad_labels = {}
         self.quad_logos = {}    # quad_name -> ttk.Label for logo image
         self.quad_frames = {}
+        self.quad_max_btns = {}  # quad_name -> ttk.Button for Max/Shrink
         positions = [
             ("Upper Left", 0, 0),
             ("Upper Right", 0, 1),
@@ -887,29 +1298,16 @@ class QuadViewerApp:
                 text="Front",
                 command=lambda q=quad_name: self._bring_quad_to_front(q),
             ).pack(side=tk.LEFT, padx=2)
-
-        # Bottom controls
-        controls = ttk.Frame(right_frame, padding=(0, 8, 0, 0))
-        controls.pack(fill=tk.X)
-
-        ttk.Button(controls, text="Execute", command=self._execute).pack(
-            side=tk.LEFT, padx=4
-        )
-        ttk.Button(controls, text="Clear All", command=self._clear_all_quadrants).pack(
-            side=tk.LEFT, padx=4
-        )
-        ttk.Button(controls, text="Bring to Front", command=self._bring_to_front).pack(
-            side=tk.LEFT, padx=4
-        )
-        ttk.Button(controls, text="Close All", command=self._close_all).pack(
-            side=tk.LEFT, padx=4
-        )
-        ttk.Button(controls, text="Exit", command=self._on_close).pack(
-            side=tk.LEFT, padx=4
-        )
+            max_btn = ttk.Button(
+                btn_frame,
+                text="Max",
+                command=lambda q=quad_name: self._toggle_maximize(q),
+            )
+            max_btn.pack(side=tk.LEFT, padx=2)
+            self.quad_max_btns[quad_name] = max_btn
 
         # Audio controls
-        audio_frame = ttk.LabelFrame(right_frame, text="Audio (Ctrl+1-4)", padding=4)
+        audio_frame = ttk.LabelFrame(right_frame, text="Audio (Ctrl+1-4, 0=Mute)  |  Max/Shrink (Ctrl+5-8)  |  App/TV (Ctrl+9)", padding=4)
         audio_frame.pack(fill=tk.X, pady=(6, 0))
         audio_map = [
             ("1: Upper Left", "Upper Left"),
@@ -935,6 +1333,51 @@ class QuadViewerApp:
             variable=self.block_spectrum_iha,
         ).pack(fill=tk.X, pady=(6, 0))
 
+        # Presets
+        preset_frame = ttk.LabelFrame(right_frame, text="Presets", padding=4)
+        preset_frame.pack(fill=tk.X, pady=(6, 0))
+
+        self._preset_var = tk.StringVar()
+        self._preset_combo = ttk.Combobox(
+            preset_frame, textvariable=self._preset_var,
+            state="readonly", width=20,
+        )
+        self._preset_combo.pack(side=tk.LEFT, padx=(0, 4), fill=tk.X, expand=True)
+        self._refresh_preset_combo()
+
+        ttk.Button(preset_frame, text="Load", command=self._load_preset).pack(
+            side=tk.LEFT, padx=2
+        )
+        ttk.Button(preset_frame, text="Save", command=self._save_preset).pack(
+            side=tk.LEFT, padx=2
+        )
+        ttk.Button(preset_frame, text="Overwrite", command=self._overwrite_preset).pack(
+            side=tk.LEFT, padx=2
+        )
+        ttk.Button(preset_frame, text="Delete", command=self._delete_preset).pack(
+            side=tk.LEFT, padx=2
+        )
+
+        # Bottom controls (centered)
+        controls = ttk.Frame(right_frame, padding=(0, 8, 0, 0))
+        controls.pack(pady=(4, 0))
+
+        ttk.Button(controls, text="Execute", command=self._execute).pack(
+            side=tk.LEFT, padx=4
+        )
+        ttk.Button(controls, text="Clear All", command=self._clear_all_quadrants).pack(
+            side=tk.LEFT, padx=4
+        )
+        ttk.Button(controls, text="Bring to Front", command=self._bring_to_front).pack(
+            side=tk.LEFT, padx=4
+        )
+        ttk.Button(controls, text="Close All", command=self._close_all).pack(
+            side=tk.LEFT, padx=4
+        )
+        ttk.Button(controls, text="Exit", command=self._on_close).pack(
+            side=tk.LEFT, padx=4
+        )
+
     def _populate_tree(self):
         for item in self.channel_tree.get_children():
             self.channel_tree.delete(item)
@@ -944,6 +1387,39 @@ class QuadViewerApp:
                 self.channel_tree.insert("", tk.END, values=(ch["name"],), image=logo)
             else:
                 self.channel_tree.insert("", tk.END, values=(ch["name"],))
+
+    # ---- Channel hover (programming guide) -----------------------------------
+
+    def _on_tree_hover(self, event):
+        """Show a tooltip with current programming when hovering over a channel."""
+        item = self.channel_tree.identify_row(event.y)
+        if not item:
+            self._tooltip.hide()
+            self._tooltip_item = None
+            return
+        if item == self._tooltip_item:
+            # Same item — just update position
+            self._tooltip.geometry(
+                f"+{event.x_root + 16}+{event.y_root + 10}"
+            )
+            return
+        self._tooltip_item = item
+        children = list(self.channel_tree.get_children())
+        idx = children.index(item)
+        if idx < 0 or idx >= len(self.channels):
+            self._tooltip.hide()
+            return
+        ch = self.channels[idx]
+        tvg_name = ch.get("tvguide_name")
+        info = get_current_show(tvg_name)
+        if info:
+            self._tooltip.show(info, event.x_root, event.y_root)
+        else:
+            self._tooltip.hide()
+
+    def _on_tree_leave(self, event):
+        self._tooltip.hide()
+        self._tooltip_item = None
 
     # ---- Drag and drop -----------------------------------------------------
 
@@ -984,8 +1460,8 @@ class QuadViewerApp:
             lbl = tk.Label(
                 self._drag_indicator,
                 text=self._drag_channel["name"],
-                bg="#ffffcc",
-                fg="#333333",
+                bg="#3a3a5c",
+                fg="#e0e0e0",
                 relief="solid",
                 borderwidth=1,
                 padx=6,
@@ -1021,7 +1497,7 @@ class QuadViewerApp:
                             self._drop_line.attributes("-topmost", True)
                             self._drop_line_canvas = tk.Canvas(
                                 self._drop_line, height=3, highlightthickness=0,
-                                bg="#0066cc"
+                                bg="#57a5ff"
                             )
                             self._drop_line_canvas.pack(fill=tk.X)
                         line_abs_x = self.channel_tree.winfo_rootx() + lx
@@ -1203,30 +1679,242 @@ class QuadViewerApp:
             self._update_quad_display(quad_name, None)
         self._save_assignments()
 
+    # ---- Presets -------------------------------------------------------------
+
+    def _refresh_preset_combo(self):
+        """Update the preset combobox values from the current presets list."""
+        names = [p["name"] for p in self.presets]
+        self._preset_combo["values"] = names
+        if names and not self._preset_var.get():
+            self._preset_var.set(names[0])
+        elif self._preset_var.get() not in names:
+            self._preset_var.set(names[0] if names else "")
+
+    def _get_selected_preset_idx(self):
+        """Return the index of the currently selected preset, or None."""
+        name = self._preset_var.get()
+        for i, p in enumerate(self.presets):
+            if p["name"] == name:
+                return i
+        return None
+
+    def _channel_by_name(self, name):
+        """Find a channel dict by name, or None."""
+        for ch in self.channels:
+            if ch["name"] == name:
+                return ch
+        return None
+
+    def _load_preset(self):
+        """Apply the selected preset to all four quadrants."""
+        idx = self._get_selected_preset_idx()
+        if idx is None:
+            messagebox.showwarning("No Preset", "Select a preset to load.")
+            return
+        preset = self.presets[idx]
+        assignments = preset.get("assignments", {})
+        for quad_name in QUADRANTS:
+            ch_name = assignments.get(quad_name)
+            ch = self._channel_by_name(ch_name) if ch_name else None
+            self.assignments[quad_name] = ch
+            self._update_quad_display(quad_name, ch)
+        self._save_assignments()
+
+    def _save_preset(self):
+        """Save current quadrant assignments as a new preset."""
+        # Build assignment map from current state
+        assignment_map = {}
+        for quad_name, ch in self.assignments.items():
+            if ch is not None:
+                assignment_map[quad_name] = ch["name"]
+
+        if not assignment_map:
+            messagebox.showwarning(
+                "Nothing to Save",
+                "Assign at least one channel to a quadrant before saving a preset.",
+            )
+            return
+
+        # Prompt for name
+        name = simpledialog.askstring(
+            "Save Preset", "Preset name:", parent=self.root
+        )
+        if not name or not name.strip():
+            return
+        name = name.strip()
+
+        # Check for duplicate name
+        for p in self.presets:
+            if p["name"] == name:
+                if not messagebox.askyesno(
+                    "Preset Exists",
+                    f"A preset named '{name}' already exists. Overwrite it?",
+                    parent=self.root,
+                ):
+                    return
+                p["assignments"] = assignment_map
+                save_presets(self.presets)
+                self._refresh_preset_combo()
+                self._preset_var.set(name)
+                return
+
+        self.presets.append({"name": name, "assignments": assignment_map})
+        save_presets(self.presets)
+        self._refresh_preset_combo()
+        self._preset_var.set(name)
+
+    def _overwrite_preset(self):
+        """Update the selected preset with the current quadrant assignments."""
+        idx = self._get_selected_preset_idx()
+        if idx is None:
+            messagebox.showwarning("No Preset", "Select a preset to overwrite.")
+            return
+
+        assignment_map = {}
+        for quad_name, ch in self.assignments.items():
+            if ch is not None:
+                assignment_map[quad_name] = ch["name"]
+
+        name = self.presets[idx]["name"]
+        if not messagebox.askyesno(
+            "Confirm Overwrite",
+            f"Overwrite preset '{name}' with current assignments?",
+            parent=self.root,
+        ):
+            return
+
+        self.presets[idx]["assignments"] = assignment_map
+        save_presets(self.presets)
+
+    def _delete_preset(self):
+        """Delete the selected preset."""
+        idx = self._get_selected_preset_idx()
+        if idx is None:
+            messagebox.showwarning("No Preset", "Select a preset to delete.")
+            return
+        name = self.presets[idx]["name"]
+        if not messagebox.askyesno(
+            "Confirm Delete", f"Delete preset '{name}'?", parent=self.root
+        ):
+            return
+        self.presets.pop(idx)
+        save_presets(self.presets)
+        self._refresh_preset_combo()
+
     # ---- Window management --------------------------------------------------
 
     def _bring_to_front(self):
-        """Bring all Chrome windows to the foreground via CDP."""
-        if not self.active_ports:
+        """Bring all Chrome windows to the OS foreground."""
+        if not self.active_pids:
             return
-        for port in self.active_ports.values():
+        for pid in self.active_pids.values():
             threading.Thread(
-                target=cdp_send,
-                args=(port, "Page.bringToFront", {}),
-                kwargs={"retries": 2, "delay": 1},
+                target=bring_os_window_to_front,
+                args=(pid,),
                 daemon=True,
             ).start()
 
+    def _toggle_app_or_tv(self):
+        """Ctrl+9: toggle between showing the app and showing the TV windows."""
+        if self._ctrl9_showing_app:
+            # Second press: bring TV windows back to front
+            self._bring_to_front()
+            self._ctrl9_showing_app = False
+        else:
+            # First press: bring the app to front
+            self.root.deiconify()
+            self.root.lift()
+            self.root.attributes("-topmost", True)
+            self.root.after(100, lambda: self.root.attributes("-topmost", False))
+            self.root.focus_force()
+            self._ctrl9_showing_app = True
+
     def _bring_quad_to_front(self, quad_name):
-        """Bring a single quadrant's Chrome window to the foreground."""
-        port = self.active_ports.get(quad_name)
-        if port:
+        """Bring a single quadrant's Chrome window to the OS foreground."""
+        pid = self.active_pids.get(quad_name)
+        if pid:
             threading.Thread(
-                target=cdp_send,
-                args=(port, "Page.bringToFront", {}),
-                kwargs={"retries": 2, "delay": 1},
+                target=bring_os_window_to_front,
+                args=(pid,),
                 daemon=True,
             ).start()
+
+    def _toggle_maximize(self, quad_name):
+        """Toggle a quadrant's window between maximized (fullscreen) and original size."""
+        port = self.active_ports.get(quad_name)
+        if not port:
+            return
+
+        ch = self.assignments.get(quad_name)
+        url = ch.get("url", "") if ch else ""
+        is_spectrum = "spectrum.net" in url
+
+        if self._quad_maximized.get(quad_name, False):
+            # Restore to original rect (don't bring to front)
+            self._restore_quad(quad_name, is_spectrum)
+        else:
+            # Restore any other maximized window first
+            for other_q in QUADRANTS:
+                if other_q != quad_name and self._quad_maximized.get(other_q, False):
+                    other_ch = self.assignments.get(other_q)
+                    other_spectrum = "spectrum.net" in (other_ch.get("url", "") if other_ch else "")
+                    self._restore_quad(other_q, other_spectrum)
+
+            # Maximize to full work area
+            work_x, work_y, work_w, work_h = get_work_area()
+            x = work_x - WIN_BORDER
+            y = work_y - WIN_BORDER
+            w = work_w + 2 * WIN_BORDER
+            h = work_h + 2 * WIN_BORDER
+            pid = self.active_pids.get(quad_name)
+            threading.Thread(
+                target=self._do_resize_and_front,
+                args=(port, pid, x, y, w, h, is_spectrum),
+                daemon=True,
+            ).start()
+            self._quad_maximized[quad_name] = True
+            self.quad_max_btns[quad_name].config(text="Shrink")
+            # Switch audio to the maximized window
+            self._set_audio_solo(quad_name)
+
+    def _restore_quad(self, quad_name, is_spectrum=False):
+        """Restore a maximized quadrant to its original size without bringing to front."""
+        port = self.active_ports.get(quad_name)
+        rect = self._quad_rects.get(quad_name)
+        if port and rect:
+            x, y, w, h = rect
+            threading.Thread(
+                target=self._do_resize,
+                args=(port, x, y, w, h, is_spectrum),
+                daemon=True,
+            ).start()
+        self._quad_maximized[quad_name] = False
+        self.quad_max_btns[quad_name].config(text="Max")
+
+    def _do_resize(self, port, x, y, w, h, is_spectrum=False):
+        """Background: resize window, resume Spectrum video if needed."""
+        cdp_set_window_bounds(port, x, y, w, h)
+        if is_spectrum:
+            # Browser may natively pause video on resize; resume with
+            # userGesture=True so Chrome's autoplay policy allows play().
+            time.sleep(2)
+            cdp_evaluate(port, RESUME_VIDEO_JS, retries=2, delay=1, user_gesture=True)
+            time.sleep(3)
+            cdp_evaluate(port, RESUME_VIDEO_JS, retries=2, delay=1, user_gesture=True)
+
+    def _do_resize_and_front(self, port, pid, x, y, w, h, is_spectrum=False):
+        """Background: resize window then bring to front."""
+        cdp_set_window_bounds(port, x, y, w, h)
+        time.sleep(0.3)
+        if pid:
+            bring_os_window_to_front(pid)
+        if is_spectrum:
+            # Browser may natively pause video on resize; resume with
+            # userGesture=True so Chrome's autoplay policy allows play().
+            time.sleep(2)
+            cdp_evaluate(port, RESUME_VIDEO_JS, retries=2, delay=1, user_gesture=True)
+            time.sleep(3)
+            cdp_evaluate(port, RESUME_VIDEO_JS, retries=2, delay=1, user_gesture=True)
 
     # ---- Launch / close ----------------------------------------------------
 
@@ -1256,6 +1944,11 @@ class QuadViewerApp:
 
         self._close_all()
         self.active_ports.clear()
+        self.active_pids.clear()
+        self._quad_rects.clear()
+        self._quad_maximized.clear()
+        for btn in self.quad_max_btns.values():
+            btn.config(text="Max")
 
         rects = get_smart_rects(active, work_x, work_y, work_w, work_h)
 
@@ -1270,6 +1963,7 @@ class QuadViewerApp:
                 continue
 
             x, y, w, h = rects[quad_name]
+            self._quad_rects[quad_name] = (x, y, w, h)
             profile_dir = self._get_profile_dir(quad_name)
             debug_port = CDP_BASE_PORT + CDP_PORT_OFFSETS[quad_name]
             self.active_ports[quad_name] = debug_port
@@ -1284,6 +1978,7 @@ class QuadViewerApp:
                 "--disable-infobars",
                 "--no-first-run",
                 "--no-default-browser-check",
+                "--disable-features=MediaRouter",
             ]
 
             # Block Spectrum in-home authentication (IP-based auto-login)
@@ -1298,16 +1993,18 @@ class QuadViewerApp:
 
             proc = subprocess.Popen(cmd)
             self.processes.append(proc)
+            self.active_pids[quad_name] = proc.pid
 
             # Inject auto-click JS in a background thread after Chrome loads
+            muted = quad_name != "Upper Left"
             t = threading.Thread(
-                target=inject_js_thread, args=(debug_port,), daemon=True
+                target=inject_js_thread, args=(debug_port, muted), daemon=True
             )
             t.start()
 
             # Click center of video at 20s to unpause
             t2 = threading.Thread(
-                target=unpause_thread, args=(debug_port, w, h), daemon=True
+                target=unpause_thread, args=(debug_port, w, h, url), daemon=True
             )
             t2.start()
 
@@ -1348,9 +2045,11 @@ class QuadViewerApp:
         VK_1 = 0x31
         WM_HOTKEY = 0x0312
 
-        # Register Ctrl+1 through Ctrl+4
-        for i in range(4):
+        # Register Ctrl+1..4 (audio), Ctrl+5..8 (maximize), Ctrl+9 (app/tv toggle), Ctrl+0 (mute all)
+        VK_0 = 0x30
+        for i in range(9):
             user32.RegisterHotKey(None, i + 1, MOD_CTRL, VK_1 + i)
+        user32.RegisterHotKey(None, 10, MOD_CTRL, VK_0)
 
         # Blocking message loop — GetMessageW returns 0 on WM_QUIT
         msg = ctypes.wintypes.MSG()
@@ -1360,9 +2059,16 @@ class QuadViewerApp:
                 if 1 <= hk_id <= 4:
                     quad = self._QUAD_ORDER[hk_id - 1]
                     self.root.after(0, self._set_audio_solo, quad)
+                elif 5 <= hk_id <= 8:
+                    quad = self._QUAD_ORDER[hk_id - 5]
+                    self.root.after(0, self._toggle_maximize, quad)
+                elif hk_id == 9:
+                    self.root.after(0, self._toggle_app_or_tv)
+                elif hk_id == 10:
+                    self.root.after(0, self._mute_all)
 
         # Cleanup
-        for i in range(4):
+        for i in range(10):
             user32.UnregisterHotKey(None, i + 1)
 
     def _initial_mute(self):
@@ -1381,10 +2087,32 @@ class QuadViewerApp:
         self.audio_quad = quad_name
         for q, port in self.active_ports.items():
             js = self.UNMUTE_JS if q == quad_name else self.MUTE_JS
+            ch = self.assignments.get(q)
+            is_spectrum = "spectrum.net" in (ch.get("url", "") if ch else "")
             threading.Thread(
-                target=cdp_evaluate, args=(port, js, 3, 1), daemon=True
+                target=self._do_audio_switch,
+                args=(port, js, is_spectrum),
+                daemon=True,
             ).start()
         self._update_audio_indicator()
+
+    def _mute_all(self):
+        """Mute all quadrants."""
+        if not self.active_ports:
+            return
+        self.audio_quad = None
+        for q, port in self.active_ports.items():
+            threading.Thread(
+                target=cdp_evaluate, args=(port, self.MUTE_JS, 3, 1), daemon=True
+            ).start()
+        self._update_audio_indicator()
+
+    def _do_audio_switch(self, port, js, is_spectrum):
+        """Background: mute/unmute, then resume Spectrum if it paused."""
+        cdp_evaluate(port, js, retries=3, delay=1)
+        if is_spectrum:
+            time.sleep(1)
+            cdp_evaluate(port, RESUME_VIDEO_JS, retries=2, delay=1, user_gesture=True)
 
     def _update_audio_indicator(self):
         """Update quadrant labels to show which has audio (preserves logos)."""
@@ -1421,6 +2149,233 @@ class QuadViewerApp:
                 proc.kill()
         self.processes.clear()
         self.active_ports.clear()
+        self.active_pids.clear()
+
+    # ---- Preferences --------------------------------------------------------
+
+    def _show_preferences(self):
+        """Show the Preferences dialog with theme picker."""
+        win = tk.Toplevel(self.root)
+        _set_icon(win)
+        win.title("Preferences")
+        win.resizable(False, False)
+        win.transient(self.root)
+        win.grab_set()
+
+        pad = {"padx": 10, "pady": 6}
+
+        ttk.Label(win, text="Visual Theme:", font=("Segoe UI", 10)).grid(
+            row=0, column=0, sticky="w", **pad
+        )
+
+        # Use ttkbootstrap's own style object (not bare ttk.Style())
+        tbs_style = self.root.style
+        all_themes = sorted([
+            "cosmo", "flatly", "litera", "minty", "lumen", "sandstone", "yeti",
+            "pulse", "united", "morph", "journal", "darkly", "superhero",
+            "solar", "cyborg", "vapor", "simplex", "cerculean",
+        ])
+        current_theme = tbs_style.theme_use()
+
+        theme_var = tk.StringVar(value=current_theme)
+        theme_combo = ttk.Combobox(
+            win, textvariable=theme_var, values=all_themes,
+            state="readonly", width=25,
+        )
+        theme_combo.grid(row=0, column=1, **pad)
+
+        # Live preview
+        preview_label = ttk.Label(win, text="")
+        preview_label.grid(row=1, column=0, columnspan=2, **pad)
+
+        def on_theme_change(event=None):
+            name = theme_var.get()
+            try:
+                tbs_style.theme_use(name)
+                preview_label.config(text=f"Preview: {name}")
+            except Exception:
+                preview_label.config(text=f"Could not load: {name}")
+
+        theme_combo.bind("<<ComboboxSelected>>", on_theme_change)
+
+        def apply_and_close():
+            chosen = theme_var.get()
+            try:
+                tbs_style.theme_use(chosen)
+            except Exception:
+                pass
+            settings = load_settings()
+            settings["theme"] = chosen
+            save_settings(settings)
+            # Re-apply hover style for the new theme
+            tbs_style.configure("Hover.TLabelframe", background="#1a3a5c")
+            tbs_style.configure("Hover.TLabelframe.Label", background="#1a3a5c")
+            win.destroy()
+
+        def cancel():
+            # Restore original theme
+            try:
+                tbs_style.theme_use(current_theme)
+            except Exception:
+                pass
+            win.destroy()
+
+        btn_frame = ttk.Frame(win)
+        btn_frame.grid(row=2, column=0, columnspan=2, pady=10)
+        ttk.Button(btn_frame, text="OK", command=apply_and_close).pack(
+            side=tk.LEFT, padx=6
+        )
+        ttk.Button(btn_frame, text="Cancel", command=cancel).pack(
+            side=tk.LEFT, padx=6
+        )
+
+        # Center on parent
+        win.update_idletasks()
+        pw = self.root.winfo_width()
+        ph = self.root.winfo_height()
+        px = self.root.winfo_x()
+        py = self.root.winfo_y()
+        w = win.winfo_width()
+        h = win.winfo_height()
+        win.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
+
+    # ---- Help / About --------------------------------------------------------
+
+    def _show_help(self):
+        """Display the QuadViewer help documentation."""
+        help_text = (
+            "DEVCON QUADVIEWER HELP\n"
+            "======================\n\n"
+            "DevCon QuadViewer launches up to four streaming TV channels in borderless\n"
+            "Chrome windows arranged in screen quadrants.\n\n"
+            "GETTING STARTED\n"
+            "---------------\n"
+            "1. Select a channel from the list on the left.\n"
+            "2. Click 'Set' on one of the four quadrants (Upper Left, Upper Right,\n"
+            "   Lower Left, Lower Right), or drag the channel onto a quadrant.\n"
+            "3. Repeat for up to four channels.\n"
+            "4. Click 'Execute' to launch all assigned channels.\n\n"
+            "CHANNEL MANAGEMENT\n"
+            "------------------\n"
+            "Add      - Create a new channel (name, URL, logo, TVGuide name).\n"
+            "Edit     - Modify the selected channel's settings.\n"
+            "Delete   - Remove the selected channel.\n"
+            "Drag     - Drag channels in the list to reorder them, or drag\n"
+            "           onto a quadrant to assign.\n\n"
+            "QUADRANT CONTROLS\n"
+            "-----------------\n"
+            "Set      - Assign the selected channel to this quadrant.\n"
+            "Clear    - Remove the channel from this quadrant.\n"
+            "Front    - Bring this quadrant's window to the foreground.\n"
+            "Max      - Maximize this window to full screen (becomes 'Shrink'\n"
+            "           to restore). Maximizing auto-restores any other\n"
+            "           maximized window and switches audio to this channel.\n\n"
+            "KEYBOARD SHORTCUTS (global - work even when QuadViewer is behind)\n"
+            "-------------------------------------------------------------------\n"
+            "Ctrl+1   - Audio to Upper Left\n"
+            "Ctrl+2   - Audio to Upper Right\n"
+            "Ctrl+3   - Audio to Lower Left\n"
+            "Ctrl+4   - Audio to Lower Right\n"
+            "Ctrl+0   - Mute all channels\n"
+            "Ctrl+5   - Maximize / Shrink Upper Left\n"
+            "Ctrl+6   - Maximize / Shrink Upper Right\n"
+            "Ctrl+7   - Maximize / Shrink Lower Left\n"
+            "Ctrl+8   - Maximize / Shrink Lower Right\n"
+            "Ctrl+9   - Toggle between QuadViewer app and TV windows\n\n"
+            "PRESETS\n"
+            "-------\n"
+            "Save     - Save current quadrant assignments as a named preset.\n"
+            "Load     - Restore a previously saved preset.\n"
+            "Overwrite- Update an existing preset with current assignments.\n"
+            "Delete   - Remove a saved preset.\n\n"
+            "PROGRAMMING GUIDE\n"
+            "-----------------\n"
+            "Hover over a channel in the list to see what's currently airing\n"
+            "and what's on next (requires a TVGuide Name set for the channel).\n\n"
+            "OTHER CONTROLS\n"
+            "--------------\n"
+            "Bring to Front - Bring all TV windows to the foreground.\n"
+            "Clear All      - Remove all quadrant assignments.\n"
+            "Close All      - Close all launched Chrome windows.\n"
+            "Block Spectrum auto-login - Prevents Spectrum from overriding\n"
+            "                 the saved login with in-home authentication.\n"
+        )
+        win = tk.Toplevel(self.root)
+        _set_icon(win)
+        win.title("DevCon QuadViewer Help")
+        win.geometry("600x520")
+        win.transient(self.root)
+        text = tk.Text(
+            win, wrap=tk.WORD, padx=12, pady=12,
+            font=("Consolas", 10),
+            bg="#2b2b2b", fg="#e0e0e0",
+            insertbackground="#e0e0e0",
+            selectbackground="#3a5a8c",
+        )
+        text.insert("1.0", help_text)
+        text.config(state=tk.DISABLED)
+        scroll = ttk.Scrollbar(win, orient=tk.VERTICAL, command=text.yview)
+        text.configure(yscrollcommand=scroll.set)
+        scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        text.pack(fill=tk.BOTH, expand=True)
+        ttk.Button(win, text="Close", command=win.destroy).pack(pady=8)
+
+    def _open_youtube_tutorial(self):
+        """Open the YouTube tutorial in the default browser."""
+        import webbrowser
+        webbrowser.open("https://www.youtube.com/results?search_query=QuadViewer+TV+streaming")
+
+    def _show_about(self):
+        """Show the About dialog with developer photo."""
+        win = tk.Toplevel(self.root)
+        _set_icon(win)
+        win.title("About DevCon QuadViewer")
+        win.resizable(False, False)
+        win.transient(self.root)
+        win.grab_set()
+
+        frame = ttk.Frame(win, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # Developer photo
+        self._about_photo = None
+        dev_path = os.path.join(_DATA_DIR, "developer.jpg")
+        if os.path.isfile(dev_path):
+            try:
+                img = Image.open(dev_path)
+                img.thumbnail((150, 150), Image.LANCZOS)
+                self._about_photo = ImageTk.PhotoImage(img)
+                ttk.Label(frame, image=self._about_photo).pack(pady=(0, 10))
+            except Exception:
+                pass
+
+        about_text = (
+            "DevCon QuadViewer\n"
+            "Version 1.0\n\n"
+            "by DevCon Productions\n"
+            "Cleveland, Ohio, USA\n\n"
+            "Copyright \u00a9 2026 by DevCon Productions\n"
+            "MIT License\n\n"
+            "This software is provided as-is, without warranty\n"
+            "of any kind, express or implied.\n\n"
+            "Vibe Coded with Claude Code"
+        )
+        ttk.Label(
+            frame, text=about_text, justify=tk.CENTER,
+            font=("Segoe UI", 10),
+        ).pack(pady=(0, 10))
+
+        ttk.Button(frame, text="OK", command=win.destroy).pack()
+
+        # Center on parent
+        win.update_idletasks()
+        pw = self.root.winfo_width()
+        ph = self.root.winfo_height()
+        px = self.root.winfo_x()
+        py = self.root.winfo_y()
+        w = win.winfo_width()
+        h = win.winfo_height()
+        win.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
 
     def _on_close(self):
         # Post WM_QUIT to the hotkey thread so GetMessageW returns 0
@@ -1440,19 +2395,36 @@ def main():
     # (without this, Python's default icon is used)
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("DevCon.QuadViewer.1")
 
-    root = tk.Tk()
-    root.geometry("700x540")
+    settings = load_settings()
+    theme = settings.get("theme", DEFAULT_THEME)
+
+    # Validate theme is a real ttkbootstrap theme
+    TTKB_THEMES = [
+        "cosmo", "flatly", "litera", "minty", "lumen", "sandstone", "yeti",
+        "pulse", "united", "morph", "journal", "darkly", "superhero",
+        "solar", "cyborg", "vapor", "simplex", "cerculean",
+    ]
+    if theme not in TTKB_THEMES:
+        theme = DEFAULT_THEME
+
+    root = tbs.Window(
+        title="DevCon QuadViewer",
+        themename=theme,
+        size=(900, 660),
+        minsize=(900, 660),
+        hdpi=False,
+    )
 
     # Window / taskbar icon
-    ico_path = os.path.join(SCRIPT_DIR, "quadviewer.ico")
-    if os.path.isfile(ico_path):
-        root.iconbitmap(ico_path)
+    if os.path.isfile(ICO_PATH):
+        root.iconbitmap(ICO_PATH)
 
-    style = ttk.Style()
-    style.configure("Hover.TLabelframe", background="#d0e8ff")
-    style.configure("Hover.TLabelframe.Label", background="#d0e8ff")
+    style = root.style
+    style.configure("Hover.TLabelframe", background="#1a3a5c")
+    style.configure("Hover.TLabelframe.Label", background="#1a3a5c")
 
     app = QuadViewerApp(root)
+
     root.mainloop()
 
 

@@ -1,3 +1,4 @@
-# QuadViewer dependencies
+# DevCon QuadViewer dependencies
 # tkinter is included with Python's standard library on Windows.
 Pillow
+ttkbootstrap

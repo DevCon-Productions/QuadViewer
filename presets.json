@@ -1,0 +1,20 @@
+[
+  {
+    "name": "Sports (E/E2/CBS/FD)",
+    "assignments": {
+      "Upper Left": "ESPN",
+      "Upper Right": "ESPN2",
+      "Lower Left": "CBS Sports",
+      "Lower Right": "FanDuel"
+    }
+  },
+  {
+    "name": "News (FW/MSNOW/Sky/CNN)",
+    "assignments": {
+      "Upper Left": "Fox Weather",
+      "Upper Right": "MS NOW",
+      "Lower Left": "Sky News",
+      "Lower Right": "CNN"
+    }
+  }
+]

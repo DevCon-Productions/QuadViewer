@@ -2,22 +2,26 @@
   {
     "name": "ESPN",
     "url": "https://www.fubo.tv/p/watch?channelId%3D10179%26type%3Dlive",
-    "logo": "espn.png"
+    "logo": "espn.png",
+    "tvguide_name": "ESPN"
   },
   {
     "name": "ESPN2",
     "url": "https://www.fubo.tv/p/watch?channelId%3D12444%26type%3Dlive",
-    "logo": "espn2.png"
+    "logo": "espn2.png",
+    "tvguide_name": "ESPN2"
   },
   {
     "name": "ABC",
     "url": "https://www.fubo.tv/p/watch?channelId%3D21101%26type%3Dlive",
-    "logo": "abc.png"
+    "logo": "abc.png",
+    "tvguide_name": "ABC"
   },
   {
     "name": "CNN",
     "url": "https://watch.spectrum.net/livetv?tmsid=58646",
-    "logo": "cnn.png"
+    "logo": "cnn.png",
+    "tvguide_name": "CNN"
   },
   {
     "name": "Fox Weather",
@@ -27,32 +31,38 @@
   {
     "name": "MS NOW",
     "url": "https://watch.spectrum.net/livetv?tmsid=64241",
-    "logo": "msnbc.png"
+    "logo": "msnow.png",
+    "tvguide_name": "MSNOW"
   },
   {
     "name": "CBS",
     "url": "https://www.fubo.tv/p/watch?channelId%3D21320%26type%3Dlive",
-    "logo": "CBS.jpg"
+    "logo": "CBS.jpg",
+    "tvguide_name": "CBS"
   },
   {
     "name": "Fox Sports 1",
     "url": "https://www.fubo.tv/p/watch?channelId%3D94653%26type%3Dlive",
-    "logo": "foxsports1.png"
+    "logo": "foxsports1.png",
+    "tvguide_name": "FS1"
   },
   {
     "name": "Fox",
     "url": "https://www.fubo.tv/p/watch?channelId%3D11590%26type%3Dlive",
-    "logo": "fox.png"
+    "logo": "fox.png",
+    "tvguide_name": "FOX"
   },
   {
     "name": "FanDuel",
     "url": "https://www.fubo.tv/p/watch?channelId%3D16176%26type%3Dlive",
-    "logo": "fanduel.png"
+    "logo": "fanduel.png",
+    "tvguide_name": "FANDU"
   },
   {
     "name": "CBS Sports",
     "url": "https://www.fubo.tv/p/watch?channelId%3D69495%26type%3Dlive",
-    "logo": "cbssports.png"
+    "logo": "cbssports.png",
+    "tvguide_name": "CBSSPT"
   },
   {
     "name": "ABC News",
@@ -62,52 +72,62 @@
   {
     "name": "NFL Network",
     "url": "https://www.fubo.tv/p/watch?channelId%3D45409%26type%3Dlive",
-    "logo": "nflnetwork.png"
+    "logo": "nflnetwork.png",
+    "tvguide_name": "NFLNET"
   },
   {
     "name": "MLB Network",
     "url": "https://www.fubo.tv/p/watch?channelId%3D72650%26type%3Dlive",
-    "logo": "mlbnetwork.png"
+    "logo": "mlbnetwork.png",
+    "tvguide_name": "MLB"
   },
   {
     "name": "NBA TV",
     "url": "https://www.fubo.tv/p/watch?channelId%3D45537%26type%3Dlive",
-    "logo": "nbatv.png"
+    "logo": "nbatv.png",
+    "tvguide_name": "NBATV"
   },
   {
     "name": "CNBC",
     "url": "https://watch.spectrum.net/livetv?tmsid=58780",
-    "logo": "cnbc.png"
+    "logo": "cnbc.png",
+    "tvguide_name": "CNBC"
   },
   {
     "name": "Fox Business",
     "url": "https://www.fubo.tv/p/watch?channelId%3D68900%26type%3Dlive",
-    "logo": "foxbusiness.png"
+    "logo": "foxbusiness.png",
+    "tvguide_name": "FOXBN"
   },
   {
     "name": "Bloomberg",
     "url": "https://www.fubo.tv/p/watch?channelId%3D83287%26type%3Dlive",
-    "logo": "bloomberg.png"
+    "logo": "bloomberg.png",
+    "tvguide_name": "BLOOMBERG"
   },
   {
     "name": "Fox Sports 2",
     "url": "https://www.fubo.tv/p/watch?channelId%3D69553%26type%3Dlive",
-    "logo": "foxsports2.png"
+    "logo": "foxsports2.png",
+    "tvguide_name": "FS2"
   },
   {
     "name": "Big 10 Network",
     "url": "https://www.fubo.tv/p/watch?channelId%3D71605%26type%3Dlive",
-    "logo": "bigten.png"
+    "logo": "bigten.png",
+    "tvguide_name": "BTN"
   },
   {
     "name": "ESPN U",
     "url": "https://www.fubo.tv/p/watch?channelId%3D71094%26type%3Dlive",
-    "logo": "espnu.png"
+    "logo": "espnu.png",
+    "tvguide_name": "ESPNU"
   },
   {
     "name": "SEC Network",
     "url": "https://www.fubo.tv/p/watch?channelId%3D102137%26type%3Dlive",
-    "logo": "secnetwork.png"
+    "logo": "secnetwork.png",
+    "tvguide_name": "SECNET"
   },
   {
     "name": "Sky News",
@@ -132,6 +152,7 @@
   {
     "name": "Reelz",
     "url": "https://reelzplus.com/reelz-en/live-tv",
-    "logo": "reelz.png"
+    "logo": "reelz.png",
+    "tvguide_name": "REELZ"
   }
 ]
