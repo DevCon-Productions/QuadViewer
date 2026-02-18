@@ -48,6 +48,7 @@ SETTINGS_FILE = os.path.join(SCRIPT_DIR, "settings.json")
 PROFILES_DIR = os.path.join(SCRIPT_DIR, "profiles")
 LOGOS_DIR = os.path.join(_DATA_DIR, "logos")
 ICO_PATH = os.path.join(_DATA_DIR, "quadviewer.ico")
+SPLASH_PATH = os.path.join(_DATA_DIR, "DCPLogo.png")
 
 # Logo display sizes (pixels)
 LOGO_SMALL = 24   # channel list
@@ -778,19 +779,39 @@ INJECTED_JS = r"""
 MUTE_ALL_JS = "document.querySelectorAll('video, audio').forEach(function(el){el.muted=true;});"
 RESUME_VIDEO_JS = "document.querySelectorAll('video').forEach(function(v){if(v.paused)try{v.play()}catch(e){}});"
 
+# YouTube's internal player overrides the HTML5 .muted property, so we must
+# use the player API (#movie_player.mute()/.unMute()) AND set the element
+# property to keep them in sync.
+YT_MUTE_JS = (
+    "(function(){"
+    "var p=document.getElementById('movie_player');"
+    "if(p&&p.mute)p.mute();"
+    "document.querySelectorAll('video, audio').forEach(function(el){el.muted=true;});"
+    "})();"
+)
+YT_UNMUTE_JS = (
+    "(function(){"
+    "var p=document.getElementById('movie_player');"
+    "if(p&&p.unMute)p.unMute();"
+    "document.querySelectorAll('video, audio').forEach(function(el){el.muted=false;});"
+    "})();"
+)
 
-def inject_js_thread(port, start_muted=False):
+
+def inject_js_thread(port, start_muted=False, url=""):
     """Background thread: inject JS multiple times to survive page navigations."""
+    is_yt = "youtube.com" in url or "youtu.be" in url
+    mute_js = YT_MUTE_JS if is_yt else MUTE_ALL_JS
     # First injection: as soon as Chrome is reachable
     cdp_evaluate(port, INJECTED_JS)
     if start_muted:
-        cdp_evaluate(port, MUTE_ALL_JS, retries=2, delay=1)
+        cdp_evaluate(port, mute_js, retries=2, delay=1)
     # Re-inject after delays to catch pages that navigate/redirect
     for wait in (8, 12, 15, 20):
         time.sleep(wait)
         cdp_evaluate(port, INJECTED_JS, retries=3, delay=1)
         if start_muted:
-            cdp_evaluate(port, MUTE_ALL_JS, retries=1, delay=1)
+            cdp_evaluate(port, mute_js, retries=1, delay=1)
 
 
 def unpause_thread(port, win_w, win_h, url=""):
@@ -1175,6 +1196,11 @@ class QuadViewerApp:
     def _build_gui(self):
         # Menu bar
         menubar = tk.Menu(self.root)
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Import Channels & Presets...", command=self._import_data)
+        file_menu.add_command(label="Export Channels & Presets...", command=self._export_data)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self._on_close)
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label="Help", command=self._show_help)
         help_menu.add_command(label="YouTube Tutorial", command=self._open_youtube_tutorial)
@@ -1182,6 +1208,7 @@ class QuadViewerApp:
         help_menu.add_command(label="About", command=self._show_about)
         options_menu = tk.Menu(menubar, tearoff=0)
         options_menu.add_command(label="Preferences...", command=self._show_preferences)
+        menubar.add_cascade(label="File", menu=file_menu)
         menubar.add_cascade(label="Options", menu=options_menu)
         menubar.add_cascade(label="Help", menu=help_menu)
         self.root.config(menu=menubar)
@@ -1998,7 +2025,7 @@ class QuadViewerApp:
             # Inject auto-click JS in a background thread after Chrome loads
             muted = quad_name != "Upper Left"
             t = threading.Thread(
-                target=inject_js_thread, args=(debug_port, muted), daemon=True
+                target=inject_js_thread, args=(debug_port, muted, url), daemon=True
             )
             t.start()
 
@@ -2018,6 +2045,18 @@ class QuadViewerApp:
 
     MUTE_JS = "document.querySelectorAll('video, audio').forEach(function(el){el.muted=true;});"
     UNMUTE_JS = "document.querySelectorAll('video, audio').forEach(function(el){el.muted=false;});"
+
+    def _mute_js_for(self, url):
+        """Return the correct mute JS for a given channel URL."""
+        if "youtube.com" in url or "youtu.be" in url:
+            return YT_MUTE_JS
+        return self.MUTE_JS
+
+    def _unmute_js_for(self, url):
+        """Return the correct unmute JS for a given channel URL."""
+        if "youtube.com" in url or "youtu.be" in url:
+            return YT_UNMUTE_JS
+        return self.UNMUTE_JS
 
     _QUAD_ORDER = ["Upper Left", "Upper Right", "Lower Left", "Lower Right"]
 
@@ -2075,7 +2114,9 @@ class QuadViewerApp:
         """Wait for videos to load, then mute all except Upper Left."""
         time.sleep(30)
         for q, port in self.active_ports.items():
-            js = self.UNMUTE_JS if q == "Upper Left" else self.MUTE_JS
+            ch = self.assignments.get(q)
+            url = ch.get("url", "") if ch else ""
+            js = self._unmute_js_for(url) if q == "Upper Left" else self._mute_js_for(url)
             cdp_evaluate(port, js, retries=3, delay=1)
         self.audio_quad = "Upper Left"
         self.root.after(0, self._update_audio_indicator)
@@ -2086,9 +2127,10 @@ class QuadViewerApp:
             return
         self.audio_quad = quad_name
         for q, port in self.active_ports.items():
-            js = self.UNMUTE_JS if q == quad_name else self.MUTE_JS
             ch = self.assignments.get(q)
-            is_spectrum = "spectrum.net" in (ch.get("url", "") if ch else "")
+            url = ch.get("url", "") if ch else ""
+            js = self._unmute_js_for(url) if q == quad_name else self._mute_js_for(url)
+            is_spectrum = "spectrum.net" in url
             threading.Thread(
                 target=self._do_audio_switch,
                 args=(port, js, is_spectrum),
@@ -2102,8 +2144,11 @@ class QuadViewerApp:
             return
         self.audio_quad = None
         for q, port in self.active_ports.items():
+            ch = self.assignments.get(q)
+            url = ch.get("url", "") if ch else ""
+            js = self._mute_js_for(url)
             threading.Thread(
-                target=cdp_evaluate, args=(port, self.MUTE_JS, 3, 1), daemon=True
+                target=cdp_evaluate, args=(port, js, 3, 1), daemon=True
             ).start()
         self._update_audio_indicator()
 
@@ -2377,6 +2422,86 @@ class QuadViewerApp:
         h = win.winfo_height()
         win.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
 
+    # ---- Import / Export -----------------------------------------------------
+
+    def _export_data(self):
+        """Export channels, presets, and logos to a single JSON file."""
+        from tkinter import filedialog
+        import base64
+        path = filedialog.asksaveasfilename(
+            title="Export Channels & Presets",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialfile="QuadViewer_Export.json",
+        )
+        if not path:
+            return
+        channels = load_channels()
+        # Collect referenced logo files as base64
+        logos = {}
+        for ch in channels:
+            logo_name = ch.get("logo", "")
+            if logo_name and logo_name not in logos:
+                logo_path = os.path.join(LOGOS_DIR, logo_name)
+                if os.path.isfile(logo_path):
+                    with open(logo_path, "rb") as lf:
+                        logos[logo_name] = base64.b64encode(lf.read()).decode("ascii")
+        data = {
+            "channels": channels,
+            "presets": load_presets(),
+            "logos": logos,
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        messagebox.showinfo("Export Complete", f"Channels and presets exported to:\n{path}")
+
+    def _import_data(self):
+        """Import channels, presets, and logos from a previously exported JSON file."""
+        from tkinter import filedialog
+        import base64
+        path = filedialog.askopenfilename(
+            title="Import Channels & Presets",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            messagebox.showerror("Import Error", f"Could not read file:\n{e}")
+            return
+        if "channels" not in data and "presets" not in data:
+            messagebox.showerror(
+                "Import Error",
+                "This file does not appear to be a valid QuadViewer export.\n"
+                "Expected 'channels' and/or 'presets' keys.",
+            )
+            return
+        confirm = messagebox.askyesno(
+            "Confirm Import",
+            "This will replace your current channels and presets.\n\nContinue?",
+        )
+        if not confirm:
+            return
+        if "channels" in data:
+            save_channels(data["channels"])
+        if "presets" in data:
+            save_presets(data["presets"])
+        # Restore logo images
+        if "logos" in data:
+            os.makedirs(LOGOS_DIR, exist_ok=True)
+            for name, b64 in data["logos"].items():
+                logo_path = os.path.join(LOGOS_DIR, name)
+                with open(logo_path, "wb") as lf:
+                    lf.write(base64.b64decode(b64))
+        # Reload into the running app
+        self.channels = load_channels()
+        self._populate_tree()
+        self.presets = load_presets()
+        self._refresh_preset_combo()
+        messagebox.showinfo("Import Complete", "Channels and presets imported successfully.")
+
     def _on_close(self):
         # Post WM_QUIT to the hotkey thread so GetMessageW returns 0
         if hasattr(self, "_hotkey_thread_id"):
@@ -2395,6 +2520,28 @@ def main():
     # (without this, Python's default icon is used)
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("DevCon.QuadViewer.1")
 
+    # ---- Splash screen -------------------------------------------------------
+    if os.path.isfile(SPLASH_PATH):
+        import tkinter as _tk
+        splash_root = _tk.Tk()
+        splash_root.overrideredirect(True)
+        from PIL import Image, ImageTk
+        _pil_img = Image.open(SPLASH_PATH)
+        _pil_img = _pil_img.resize(
+            (int(_pil_img.width * 0.6), int(_pil_img.height * 0.6)),
+            Image.LANCZOS,
+        )
+        splash_img = ImageTk.PhotoImage(_pil_img)
+        img_w, img_h = _pil_img.width, _pil_img.height
+        sx = (splash_root.winfo_screenwidth() - img_w) // 2
+        sy = (splash_root.winfo_screenheight() - img_h) // 2
+        splash_root.geometry(f"{img_w}x{img_h}+{sx}+{sy}")
+        _tk.Label(splash_root, image=splash_img, bd=0).pack()
+        splash_root.update()
+        splash_root.after(3000, splash_root.destroy)
+        splash_root.mainloop()
+
+    # ---- Main window ----------------------------------------------------------
     settings = load_settings()
     theme = settings.get("theme", DEFAULT_THEME)
 

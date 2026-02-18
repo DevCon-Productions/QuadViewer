@@ -5,7 +5,7 @@ a = Analysis(
     ['quadviewer.py'],
     pathex=[],
     binaries=[],
-    datas=[('logos', 'logos'), ('extension', 'extension'), ('quadviewer.ico', '.'), ('developer.jpg', '.'), ('channels.json', '.'), ('presets.json', '.')],
+    datas=[('logos', 'logos'), ('extension', 'extension'), ('quadviewer.ico', '.'), ('developer.jpg', '.'), ('DCPLogo.png', '.'), ('channels.json', '.'), ('presets.json', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
