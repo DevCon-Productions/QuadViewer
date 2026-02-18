@@ -2368,7 +2368,7 @@ class QuadViewerApp:
     def _open_youtube_tutorial(self):
         """Open the YouTube tutorial in the default browser."""
         import webbrowser
-        webbrowser.open("https://www.youtube.com/results?search_query=QuadViewer+TV+streaming")
+        webbrowser.open("https://www.youtube.com/watch?v=1tzupqW2n1g")
 
     def _show_about(self):
         """Show the About dialog with developer photo."""
