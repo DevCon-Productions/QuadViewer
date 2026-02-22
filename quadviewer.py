@@ -430,6 +430,11 @@ def cdp_mouse_click(port, x, y):
              {**base, "type": "mouseReleased"}, retries=3, delay=1)
 
 
+def cdp_navigate(port, url, retries=5, delay=2):
+    """Navigate an existing Chrome tab to a new URL via CDP Page.navigate."""
+    return cdp_send(port, "Page.navigate", {"url": url}, retries, delay)
+
+
 def cdp_set_window_bounds(port, left, top, width, height, retries=5, delay=1):
     """Move/resize the Chrome window via CDP Browser.setWindowBounds."""
     for attempt in range(retries):
@@ -1332,6 +1337,21 @@ class QuadViewerApp:
             )
             max_btn.pack(side=tk.LEFT, padx=2)
             self.quad_max_btns[quad_name] = max_btn
+            ttk.Button(
+                btn_frame,
+                text="Switch",
+                command=lambda q=quad_name: self._switch_quadrant(q),
+            ).pack(side=tk.LEFT, padx=2)
+            ttk.Button(
+                btn_frame,
+                text="Close",
+                command=lambda q=quad_name: self._close_quadrant(q),
+            ).pack(side=tk.LEFT, padx=2)
+            ttk.Button(
+                btn_frame,
+                text="Open",
+                command=lambda q=quad_name: self._open_quadrant(q),
+            ).pack(side=tk.LEFT, padx=2)
 
         # Audio controls
         audio_frame = ttk.LabelFrame(right_frame, text="Audio (Ctrl+1-4, 0=Mute)  |  Max/Shrink (Ctrl+5-8)  |  App/TV (Ctrl+9)", padding=4)
@@ -1706,6 +1726,42 @@ class QuadViewerApp:
             self._update_quad_display(quad_name, None)
         self._save_assignments()
 
+    def _switch_quadrant(self, quad_name):
+        """Navigate an already-running quadrant's Chrome window to the assigned channel."""
+        port = self.active_ports.get(quad_name)
+        if not port:
+            messagebox.showinfo(
+                "Not Running",
+                f"{quad_name} has no active window.\n"
+                "Use 'Execute' to launch channels first.",
+            )
+            return
+        channel = self.assignments.get(quad_name)
+        if not channel:
+            messagebox.showwarning(
+                "No Channel",
+                f"No channel assigned to {quad_name}.\n"
+                "Use 'Set' or drag a channel first.",
+            )
+            return
+        url = channel.get("url", "")
+        if not url:
+            messagebox.showwarning(
+                "Missing URL",
+                f"No URL set for {channel['name']}.",
+            )
+            return
+
+        # Determine mute state: should this quadrant be muted?
+        start_muted = quad_name != self.audio_quad
+
+        def do_switch():
+            cdp_navigate(port, url)
+            # Re-inject automation JS after page loads
+            inject_js_thread(port, start_muted=start_muted, url=url)
+
+        threading.Thread(target=do_switch, daemon=True).start()
+
     # ---- Presets -------------------------------------------------------------
 
     def _refresh_preset_combo(self):
@@ -1829,6 +1885,125 @@ class QuadViewerApp:
         self._refresh_preset_combo()
 
     # ---- Window management --------------------------------------------------
+
+    def _close_quadrant(self, quad_name):
+        """Close a single quadrant's Chrome window."""
+        pid = self.active_pids.get(quad_name)
+        if not pid:
+            return
+        # Find and remove the matching process from self.processes
+        proc_to_close = None
+        for proc in self.processes:
+            if proc.pid == pid:
+                proc_to_close = proc
+                break
+
+        def do_close():
+            if proc_to_close and proc_to_close.poll() is None:
+                try:
+                    subprocess.run(
+                        ["taskkill", "/PID", str(proc_to_close.pid)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    proc_to_close.wait(timeout=5)
+                except (OSError, subprocess.TimeoutExpired):
+                    try:
+                        proc_to_close.kill()
+                    except OSError:
+                        pass
+
+        threading.Thread(target=do_close, daemon=True).start()
+
+        if proc_to_close:
+            self.processes.remove(proc_to_close)
+        self.active_ports.pop(quad_name, None)
+        self.active_pids.pop(quad_name, None)
+        self._quad_rects.pop(quad_name, None)
+        self._quad_maximized.pop(quad_name, None)
+        self.quad_max_btns[quad_name].config(text="Max")
+
+    def _open_quadrant(self, quad_name):
+        """Launch a single quadrant's Chrome window (e.g. after closing one)."""
+        if self.active_ports.get(quad_name):
+            messagebox.showinfo(
+                "Already Running",
+                f"{quad_name} already has an active window.",
+            )
+            return
+        channel = self.assignments.get(quad_name)
+        if not channel:
+            messagebox.showwarning(
+                "No Channel",
+                f"No channel assigned to {quad_name}.\n"
+                "Use 'Set' or drag a channel first.",
+            )
+            return
+        url = channel.get("url", "")
+        if not url:
+            messagebox.showwarning(
+                "Missing URL", f"No URL set for {channel['name']}.",
+            )
+            return
+        chrome = find_chrome()
+        if chrome is None:
+            messagebox.showerror(
+                "Chrome Not Found",
+                "Google Chrome was not found at the expected location.",
+            )
+            return
+
+        # Compute geometry based on all currently active quadrants + this one
+        work_x, work_y, work_w, work_h = get_work_area()
+        x, y, w, h = get_quadrant_rect(quad_name, work_x, work_y, work_w, work_h)
+        self._quad_rects[quad_name] = (x, y, w, h)
+
+        profile_dir = self._get_profile_dir(quad_name)
+        debug_port = CDP_BASE_PORT + CDP_PORT_OFFSETS[quad_name]
+        self.active_ports[quad_name] = debug_port
+
+        cmd = [
+            chrome,
+            f"--app={url}",
+            f"--window-position={x},{y}",
+            f"--window-size={w},{h}",
+            f"--user-data-dir={profile_dir}",
+            f"--remote-debugging-port={debug_port}",
+            "--disable-infobars",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-features=MediaRouter",
+        ]
+        if "spectrum.net" in url and self.block_spectrum_iha.get():
+            cmd.append(
+                "--host-rules="
+                "MAP login.spectrum.net 0.0.0.0,"
+                "MAP idp.spectrum.net 0.0.0.0"
+            )
+            cmd.append("--test-type")
+
+        proc = subprocess.Popen(cmd)
+        self.processes.append(proc)
+        self.active_pids[quad_name] = proc.pid
+        self._quad_maximized[quad_name] = False
+
+        muted = quad_name != self.audio_quad
+        threading.Thread(
+            target=inject_js_thread, args=(debug_port, muted, url), daemon=True
+        ).start()
+        threading.Thread(
+            target=unpause_thread, args=(debug_port, w, h, url), daemon=True
+        ).start()
+
+        # Keep the app in front after Chrome launches
+        self.root.after(500, self._raise_app)
+
+    def _raise_app(self):
+        """Bring the QuadViewer app window to the front."""
+        self.root.lift()
+        self.root.attributes("-topmost", True)
+        self.root.after(100, lambda: self.root.attributes("-topmost", False))
+        self.root.focus_force()
 
     def _bring_to_front(self):
         """Bring all Chrome windows to the OS foreground."""
@@ -2314,7 +2489,14 @@ class QuadViewerApp:
             "Front    - Bring this quadrant's window to the foreground.\n"
             "Max      - Maximize this window to full screen (becomes 'Shrink'\n"
             "           to restore). Maximizing auto-restores any other\n"
-            "           maximized window and switches audio to this channel.\n\n"
+            "           maximized window and switches audio to this channel.\n"
+            "Switch   - Navigate a running window to its assigned channel.\n"
+            "           Use this to swap channels without re-launching:\n"
+            "           1. Set a new channel on the quadrant.\n"
+            "           2. Click Switch to navigate the existing window.\n"
+            "Close    - Close just this quadrant's Chrome window.\n"
+            "Open     - Launch this quadrant's window individually\n"
+            "           (e.g. after closing it).\n\n"
             "KEYBOARD SHORTCUTS (global - work even when QuadViewer is behind)\n"
             "-------------------------------------------------------------------\n"
             "Ctrl+1   - Audio to Upper Left\n"
@@ -2557,8 +2739,8 @@ def main():
     root = tbs.Window(
         title="DevCon QuadViewer",
         themename=theme,
-        size=(900, 660),
-        minsize=(900, 660),
+        size=(1180, 700),
+        minsize=(1180, 700),
         hdpi=False,
     )
 

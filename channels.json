@@ -154,5 +154,10 @@
     "url": "https://reelzplus.com/reelz-en/live-tv",
     "logo": "reelz.png",
     "tvguide_name": "REELZ"
+  },
+  {
+    "name": "Peacock",
+    "url": "https://www.peacocktv.com/watch/home",
+    "logo": "peacock.png"
   }
 ]
