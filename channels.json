@@ -3,161 +3,762 @@
     "name": "ESPN",
     "url": "https://www.fubo.tv/p/watch?channelId%3D10179%26type%3Dlive",
     "logo": "espn.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ],
     "tvguide_name": "ESPN"
   },
   {
     "name": "ESPN2",
     "url": "https://www.fubo.tv/p/watch?channelId%3D12444%26type%3Dlive",
     "logo": "espn2.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ],
     "tvguide_name": "ESPN2"
   },
   {
     "name": "ABC",
     "url": "https://www.fubo.tv/p/watch?channelId%3D21101%26type%3Dlive",
     "logo": "abc.png",
-    "tvguide_name": "ABC"
+    "tvguide_name": "ABC",
+    "categories": [
+      "Fubo"
+    ]
   },
   {
     "name": "CNN",
     "url": "https://watch.spectrum.net/livetv?tmsid=58646",
     "logo": "cnn.png",
+    "categories": [
+      "News",
+      "Spectrum"
+    ],
     "tvguide_name": "CNN"
   },
   {
     "name": "Fox Weather",
     "url": "https://www.fubo.tv/p/watch?channelId%3D135986%26type%3Dlive",
-    "logo": "foxweather.png"
+    "logo": "foxweather.png",
+    "categories": [
+      "Fubo",
+      "News"
+    ]
   },
   {
     "name": "MS NOW",
     "url": "https://watch.spectrum.net/livetv?tmsid=64241",
     "logo": "msnow.png",
+    "categories": [
+      "News",
+      "Spectrum"
+    ],
     "tvguide_name": "MSNOW"
   },
   {
     "name": "CBS",
     "url": "https://www.fubo.tv/p/watch?channelId%3D21320%26type%3Dlive",
     "logo": "CBS.jpg",
-    "tvguide_name": "CBS"
+    "tvguide_name": "CBS",
+    "categories": [
+      "Fubo"
+    ]
   },
   {
     "name": "Fox Sports 1",
     "url": "https://www.fubo.tv/p/watch?channelId%3D94653%26type%3Dlive",
     "logo": "foxsports1.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ],
     "tvguide_name": "FS1"
   },
   {
     "name": "Fox",
     "url": "https://www.fubo.tv/p/watch?channelId%3D11590%26type%3Dlive",
     "logo": "fox.png",
-    "tvguide_name": "FOX"
+    "tvguide_name": "FOX",
+    "categories": [
+      "Fubo"
+    ]
   },
   {
     "name": "FanDuel",
     "url": "https://www.fubo.tv/p/watch?channelId%3D16176%26type%3Dlive",
     "logo": "fanduel.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ],
     "tvguide_name": "FANDU"
   },
   {
     "name": "CBS Sports",
     "url": "https://www.fubo.tv/p/watch?channelId%3D69495%26type%3Dlive",
     "logo": "cbssports.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ],
     "tvguide_name": "CBSSPT"
   },
   {
     "name": "ABC News",
     "url": "https://www.fubo.tv/p/watch?channelId%3D127957%26type%3Dlive",
-    "logo": "abcnews.jpg"
+    "logo": "abcnews.jpg",
+    "categories": [
+      "Fubo"
+    ]
   },
   {
     "name": "NFL Network",
     "url": "https://www.fubo.tv/p/watch?channelId%3D45409%26type%3Dlive",
     "logo": "nflnetwork.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ],
     "tvguide_name": "NFLNET"
   },
   {
     "name": "MLB Network",
     "url": "https://www.fubo.tv/p/watch?channelId%3D72650%26type%3Dlive",
     "logo": "mlbnetwork.png",
-    "tvguide_name": "MLB"
+    "tvguide_name": "MLB",
+    "categories": [
+      "Fubo"
+    ]
   },
   {
     "name": "NBA TV",
     "url": "https://www.fubo.tv/p/watch?channelId%3D45537%26type%3Dlive",
     "logo": "nbatv.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ],
     "tvguide_name": "NBATV"
   },
   {
     "name": "CNBC",
     "url": "https://watch.spectrum.net/livetv?tmsid=58780",
     "logo": "cnbc.png",
+    "categories": [
+      "News",
+      "Spectrum"
+    ],
     "tvguide_name": "CNBC"
   },
   {
     "name": "Fox Business",
     "url": "https://www.fubo.tv/p/watch?channelId%3D68900%26type%3Dlive",
     "logo": "foxbusiness.png",
+    "categories": [
+      "Fubo",
+      "News"
+    ],
     "tvguide_name": "FOXBN"
   },
   {
     "name": "Bloomberg",
     "url": "https://www.fubo.tv/p/watch?channelId%3D83287%26type%3Dlive",
     "logo": "bloomberg.png",
+    "categories": [
+      "Fubo",
+      "News"
+    ],
     "tvguide_name": "BLOOMBERG"
   },
   {
     "name": "Fox Sports 2",
     "url": "https://www.fubo.tv/p/watch?channelId%3D69553%26type%3Dlive",
     "logo": "foxsports2.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ],
     "tvguide_name": "FS2"
   },
   {
     "name": "Big 10 Network",
     "url": "https://www.fubo.tv/p/watch?channelId%3D71605%26type%3Dlive",
     "logo": "bigten.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ],
     "tvguide_name": "BTN"
   },
   {
     "name": "ESPN U",
     "url": "https://www.fubo.tv/p/watch?channelId%3D71094%26type%3Dlive",
     "logo": "espnu.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ],
     "tvguide_name": "ESPNU"
   },
   {
     "name": "SEC Network",
     "url": "https://www.fubo.tv/p/watch?channelId%3D102137%26type%3Dlive",
     "logo": "secnetwork.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ],
     "tvguide_name": "SECNET"
   },
   {
     "name": "Sky News",
     "url": "https://www.youtube.com/watch?v=YDvsBbKfLPA",
-    "logo": "skynews.png"
+    "logo": "skynews.png",
+    "categories": [
+      "YouTube"
+    ]
   },
   {
     "name": "Prime Video",
     "url": "https://www.amazon.com/gp/video/storefront",
-    "logo": "primevideo.png"
+    "logo": "primevideo.png",
+    "categories": []
   },
   {
     "name": "Netflix",
     "url": "https://www.netflix.com/browse",
-    "logo": "netflix.png"
+    "logo": "netflix.png",
+    "categories": []
   },
   {
     "name": "Human Dilemma",
     "url": "https://www.twitch.tv/humandilemma",
-    "logo": "humandilemma.png"
+    "logo": "humandilemma.png",
+    "categories": [
+      "Twitch"
+    ]
   },
   {
     "name": "Reelz",
     "url": "https://reelzplus.com/reelz-en/live-tv",
     "logo": "reelz.png",
-    "tvguide_name": "REELZ"
+    "tvguide_name": "REELZ",
+    "categories": []
   },
   {
     "name": "Peacock",
     "url": "https://www.peacocktv.com/watch/home",
-    "logo": "peacock.png"
+    "logo": "peacock.png",
+    "categories": []
+  },
+  {
+    "name": "Al Jazeera",
+    "url": "https://www.youtube.com/watch?v=gCNeDWCI0vo",
+    "logo": "aljazeera.png",
+    "categories": [
+      "News",
+      "YouTube"
+    ]
+  },
+  {
+    "name": "LiveNOW from FOX",
+    "url": "https://www.youtube.com/watch?v=oGHnGB3ID44",
+    "logo": "livenowfox.png",
+    "categories": [
+      "News",
+      "YouTube"
+    ]
+  },
+  {
+    "name": "NHK World-Japan",
+    "url": "https://www.youtube.com/watch?v=f0lYkdA-Gtw",
+    "logo": "nhkworld.png",
+    "categories": [
+      "News",
+      "YouTube"
+    ]
+  },
+  {
+    "name": "NASA Int Space Station",
+    "url": "https://www.youtube.com/watch?v=aB1yRz0HhdY",
+    "logo": "nasa.png",
+    "categories": [
+      "News",
+      "YouTube"
+    ]
+  },
+  {
+    "name": "Live Cameras",
+    "url": "https://www.youtube.com/watch?v=2BLqhS59Elc",
+    "logo": "bostonandmainelive.jpg",
+    "categories": [
+      "YouTube"
+    ]
+  },
+  {
+    "name": "gatobeats",
+    "url": "https://www.twitch.tv/gatobeats",
+    "logo": "gatobeats.png",
+    "categories": [
+      "Twitch"
+    ]
+  },
+  {
+    "name": "nubbinsaintnubbins",
+    "url": "https://www.twitch.tv/nubbinsaintnubbins",
+    "logo": "nubbinsaintnubbins.png",
+    "categories": [
+      "Twitch"
+    ]
+  },
+  {
+    "name": "imzurability",
+    "url": "https://www.twitch.tv/imzurability",
+    "logo": "imzurability.png",
+    "categories": [
+      "Chess",
+      "Twitch"
+    ]
+  },
+  {
+    "name": "GMHikaru",
+    "url": "https://www.twitch.tv/gmhikaru",
+    "logo": "gmhikaru.png",
+    "categories": [
+      "Chess",
+      "Twitch"
+    ]
+  },
+  {
+    "name": "ChessTV",
+    "url": "https://www.chess.com/tv",
+    "logo": "chess.jpg",
+    "categories": [
+      "Chess"
+    ]
+  },
+  {
+    "name": "Flight Radar 24",
+    "url": "https://www.flightradar24.com/41.55,-82.12/9",
+    "logo": "flightradar24.jpg",
+    "categories": []
+  },
+  {
+    "name": "Cleveland From Hilton",
+    "url": "https://g1.ipcamlive.com/player/player.php?alias=65aa806e630fa&autoplay=1&mute=1",
+    "logo": "Cleveland.png",
+    "categories": [
+      "Cleveland",
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Downtown Akron",
+    "url": "https://g1.ipcamlive.com/player/player.php?alias=63ed3a28704fc&autoplay=1&mute=1",
+    "logo": "Cleveland.png",
+    "categories": [
+      "Cleveland",
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Midtown Cleveland",
+    "url": "https://g1.ipcamlive.com/player/player.php?alias=63ed37f2439ce&autoplay=1&mute=1",
+    "logo": "Cleveland.png",
+    "categories": [
+      "Cleveland",
+      "Webcams"
+    ]
+  },
+  {
+    "name": "From Huntington Bank Field",
+    "url": "https://g1.ipcamlive.com/player/player.php?alias=6400d096802b0&autoplay=1&mute=1",
+    "logo": "Cleveland.png",
+    "categories": [
+      "Cleveland",
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Cleveland Public Library",
+    "url": "https://www.youtube.com/watch?v=ydWa5WSrJKs",
+    "logo": "Cleveland.png",
+    "categories": [
+      "Cleveland",
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Terminal Tower",
+    "url": "https://www.youtube.com/watch?v=n5Ja0_q2Cos",
+    "logo": "Cleveland.png",
+    "categories": [
+      "Cleveland",
+      "Webcams"
+    ]
+  },
+  {
+    "name": "NYC",
+    "url": "https://www.youtube.com/watch?v=n5Ja0_q2Cos",
+    "logo": "NYC.jpg",
+    "categories": [
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Times Square",
+    "url": "https://www.youtube.com/watch?v=rnXIjl_Rzy4",
+    "logo": "NYC.jpg",
+    "categories": [
+      "Webcams"
+    ]
+  },
+  {
+    "name": "NYC One Vanderbilt",
+    "url": "https://www.youtube.com/watch?v=TsgoxkRFit0",
+    "logo": "NYC.jpg",
+    "categories": [
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Brooklyn Bridge",
+    "url": "https://www.youtube.com/watch?v=pEuK-UAtT3s",
+    "logo": "NYC.jpg",
+    "categories": [
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Coney Island",
+    "url": "https://www.youtube.com/watch?v=xHLEKR3_8iI",
+    "logo": "NYC.jpg",
+    "categories": [
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Chicago Skydeck",
+    "url": "https://www.youtube.com/watch?v=sQxL8t0gtu8",
+    "logo": "Chicago.jpg",
+    "categories": [
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Dublin, Ireland",
+    "url": "https://www.youtube.com/watch?v=u4UZ4UvZXrg",
+    "logo": "Dublin.jpg",
+    "categories": [
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Western Wall Jerusalem",
+    "url": "https://www.youtube.com/watch?v=0jEa0FOw6vE",
+    "logo": "Jerusalem.png",
+    "categories": [
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Venice V Hotel, Venice Beach",
+    "url": "https://www.youtube.com/watch?v=EO_1LWqsCNE",
+    "logo": "VeniceBeach.jpg",
+    "categories": [
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Washington DC Axis Communications",
+    "url": "https://www.youtube.com/watch?v=1wV9lLe14aU",
+    "logo": "WashingtonDC.jpg",
+    "categories": [
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Midway Airport",
+    "url": "https://www.youtube.com/watch?v=67BCsiW-1Io",
+    "logo": "Midway.png",
+    "categories": [
+      "Airports",
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Philadelphia",
+    "url": "https://www.youtube.com/watch?v=RH5fgOcO0jg",
+    "logo": "Philadelphia.jpg",
+    "categories": [
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Toronto Pearson Intl Airport",
+    "url": "https://www.youtube.com/watch?v=8VnN1JGbjrA",
+    "logo": "TorontoPearson.jpg",
+    "categories": [
+      "Airports",
+      "Webcams"
+    ]
+  },
+  {
+    "name": "LAX Runways 25L and 25R",
+    "url": "https://www.youtube.com/watch?v=UQaSS4_VAV4",
+    "logo": "LAX.jpg",
+    "categories": [
+      "Airports",
+      "Webcams"
+    ]
+  },
+  {
+    "name": "LAX Runways 24L and 24R",
+    "url": "https://www.youtube.com/watch?v=VjqKog3XwZ8",
+    "logo": "LAX.jpg",
+    "categories": [
+      "Airports",
+      "Webcams"
+    ]
+  },
+  {
+    "name": "LAS Runways 26R and 26L",
+    "url": "https://www.youtube.com/watch?v=cn8_34TuMaM",
+    "logo": "LAS.jpg",
+    "categories": [
+      "Airports",
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Amsterdam (Station Centraal)",
+    "url": "https://www.youtube.com/watch?v=FHJH2yMe6Hw",
+    "logo": "Amsterdam.jpg",
+    "categories": [
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Sydney (Harbour)",
+    "url": "https://www.youtube.com/watch?v=5uZa3-RMFos",
+    "logo": "Sydney.jpg",
+    "categories": [
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Tokyo",
+    "url": "https://www.youtube.com/watch?v=bLME9s6gycw",
+    "logo": "Tokyo.jpg",
+    "categories": [
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Centrair Airport",
+    "url": "https://www.youtube.com/watch?v=_KkyeoAXGj8",
+    "logo": "Centrair.png",
+    "categories": [
+      "Airports",
+      "Webcams"
+    ]
+  },
+  {
+    "name": "Paris (Seine & Notre Dame)",
+    "url": "https://www.youtube.com/watch?v=4GCTq0j2O0U",
+    "logo": "Paris.jpg",
+    "categories": [
+      "Webcams"
+    ]
+  },
+  {
+    "name": "HBO Max",
+    "url": "https://play.hbomax.com/",
+    "logo": "HBOMax.png",
+    "categories": []
+  },
+  {
+    "name": "BEIN Sports",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D88749%26type%3Dlive",
+    "logo": "bein.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ]
+  },
+  {
+    "name": "BEIN Sports Xtra",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D127712%26type%3Dlive",
+    "logo": "bein.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ]
+  },
+  {
+    "name": "BEIN Sports 3",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D119429%26type%3Dlive",
+    "logo": "bein.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ]
+  },
+  {
+    "name": "BEIN Sports 4",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D105107%26type%3Dlive",
+    "logo": "bein.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ]
+  },
+  {
+    "name": "BEIN Sports 5",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D105103%26type%3Dlive",
+    "logo": "bein.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ]
+  },
+  {
+    "name": "BEIN Sports 6",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D105101%26type%3Dlive",
+    "logo": "bein.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ]
+  },
+  {
+    "name": "ACC Network",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D126388%26type%3Dlive",
+    "logo": "ACCN.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ],
+    "tvguide_name": "ACCN"
+  },
+  {
+    "name": "ESPNEWS",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D16485%26type%3Dlive",
+    "logo": "ESPNEWS.jpg",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ],
+    "tvguide_name": "ESPNWS"
+  },
+  {
+    "name": "Guardians Baseball",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D136324%26type%3Dlive",
+    "logo": "Guardians.jpg",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ]
+  },
+  {
+    "name": "CBS News 24/7",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D118793%26type%3Dlive",
+    "logo": "CBSNews247.jpg",
+    "categories": [
+      "Fubo",
+      "News"
+    ]
+  },
+  {
+    "name": "Comedy Central",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D73033%26type%3Dlive",
+    "logo": "ComedyCentral.png",
+    "categories": [
+      "Fubo"
+    ],
+    "tvguide_name": "CMDY-E"
+  },
+  {
+    "name": "TV Land",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D85147%26type%3Dlive",
+    "logo": "TVLand.png",
+    "categories": [
+      "Fubo"
+    ],
+    "tvguide_name": "TVLAND"
+  },
+  {
+    "name": "FX",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D68746%26type%3Dlive",
+    "logo": "FX.png",
+    "categories": [
+      "Fubo"
+    ],
+    "tvguide_name": "FX-E"
+  },
+  {
+    "name": "NHL Network",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D68871%26type%3Dlive",
+    "logo": "NHLNetwork.jpg",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ],
+    "tvguide_name": "NHLTV"
+  },
+  {
+    "name": "NBA",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D196933%26type%3Dlive",
+    "logo": "NBA.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ]
+  },
+  {
+    "name": "Marquee Sports Network",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D1283550001%26type%3Dlive",
+    "logo": "Marquee.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ]
+  },
+  {
+    "name": "PGA Tour",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D176119%26type%3Dlive",
+    "logo": "PGATour.png",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ]
+  },
+  {
+    "name": "ESPN8 The Ocho",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D161567%26type%3Dlive",
+    "logo": "ESPN8.jpg",
+    "categories": [
+      "Fubo",
+      "Sports"
+    ]
+  },
+  {
+    "name": "FXX",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D77475%26type%3Dlive",
+    "logo": "FXX.png",
+    "categories": [
+      "Fubo"
+    ],
+    "tvguide_name": "FXX"
+  },
+  {
+    "name": "Paramount Network",
+    "url": "https://www.fubo.tv/p/watch?channelId%3D69429%26type%3Dlive",
+    "logo": "Paramount.jpg",
+    "categories": [
+      "Fubo"
+    ]
   }
 ]

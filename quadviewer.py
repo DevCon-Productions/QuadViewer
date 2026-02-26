@@ -81,15 +81,18 @@ PROFILE_NAME = "Devon"
 
 
 def _copy_default_data():
-    """On first run from a frozen build, copy bundled data files to SCRIPT_DIR."""
+    """Copy bundled data files to SCRIPT_DIR on every launch (frozen builds).
+
+    This ensures upgrades always deliver the latest default channels/presets.
+    Users can use Export/Import to preserve custom channel lists across updates.
+    """
     if _DATA_DIR == SCRIPT_DIR:
         return
     for fname in ("channels.json", "presets.json"):
-        dest = os.path.join(SCRIPT_DIR, fname)
-        if not os.path.isfile(dest):
-            src = os.path.join(_DATA_DIR, fname)
-            if os.path.isfile(src):
-                shutil.copy2(src, dest)
+        src = os.path.join(_DATA_DIR, fname)
+        if os.path.isfile(src):
+            dest = os.path.join(SCRIPT_DIR, fname)
+            shutil.copy2(src, dest)
 
 _copy_default_data()
 
@@ -160,6 +163,32 @@ def save_settings(settings):
 
 
 DEFAULT_THEME = "darkly"
+
+# URL pattern -> category for auto-migration (first run only)
+_URL_CATEGORY_MAP = [
+    ("fubo.tv", "Fubo"),
+    ("spectrum.net", "Spectrum"),
+    ("youtube.com", "YouTube"),
+    ("youtu.be", "YouTube"),
+    ("twitch.tv", "Twitch"),
+]
+
+
+def _migrate_categories(channels):
+    """Add 'categories' field to channels that don't have one (auto-detect from URL)."""
+    changed = False
+    for ch in channels:
+        if "categories" in ch:
+            continue
+        url = ch.get("url", "")
+        cats = []
+        for pattern, cat in _URL_CATEGORY_MAP:
+            if pattern in url:
+                cats.append(cat)
+        ch["categories"] = cats
+        changed = True
+    if changed:
+        save_channels(channels)
 
 
 # ---------------------------------------------------------------------------
@@ -579,6 +608,35 @@ def bring_os_window_to_front(pid):
     return False
 
 
+def move_window_to_monitor(pid, direction):
+    """Move a Chrome window to the next monitor via Win+Shift+Arrow.
+
+    direction should be "left" or "right".
+    """
+    # First bring the window to the foreground so it receives the hotkey
+    if not bring_os_window_to_front(pid):
+        return
+    time.sleep(0.15)
+
+    user32 = ctypes.windll.user32
+    VK_LWIN = 0x5B
+    VK_SHIFT = 0x10
+    VK_LEFT = 0x25
+    VK_RIGHT = 0x27
+    KEYEVENTF_KEYUP = 0x0002
+
+    arrow = VK_LEFT if direction == "left" else VK_RIGHT
+
+    # Press Win+Shift+Arrow
+    user32.keybd_event(VK_LWIN, 0, 0, 0)
+    user32.keybd_event(VK_SHIFT, 0, 0, 0)
+    user32.keybd_event(arrow, 0, 0, 0)
+    # Release in reverse order
+    user32.keybd_event(arrow, 0, KEYEVENTF_KEYUP, 0)
+    user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)
+    user32.keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, 0)
+
+
 # The JavaScript to inject into each Chrome page.
 INJECTED_JS = r"""
 (function() {
@@ -931,6 +989,115 @@ def get_current_show(tvguide_name):
 
 
 # ---------------------------------------------------------------------------
+# Twitch live-status cache (public GQL endpoint, no API key needed)
+# ---------------------------------------------------------------------------
+_twitch_cache = {
+    "timestamp": 0,         # last fetch unix time
+    "data": {},             # username -> {is_live, title, game, viewers}
+    "fetching": False,
+    "channels": None,       # reference to channel list for auto-refresh
+}
+
+
+def _twitch_username(url):
+    """Return the Twitch username from a twitch.tv URL, or None."""
+    if not url or "twitch.tv/" not in url:
+        return None
+    return url.split("twitch.tv/")[-1].split("?")[0].split("#")[0].strip("/").lower()
+
+
+def _fetch_twitch_status(channels):
+    """Fetch live status for all Twitch channels via Twitch's public GQL API."""
+    now_ts = int(time.time())
+    if _twitch_cache["data"] and now_ts - _twitch_cache["timestamp"] < 120:
+        return
+    if _twitch_cache["fetching"]:
+        return
+    _twitch_cache["fetching"] = True
+    _twitch_cache["channels"] = channels
+    try:
+        usernames = []
+        for ch in channels:
+            uname = _twitch_username(ch.get("url", ""))
+            if uname:
+                usernames.append(uname)
+        if not usernames:
+            return
+        # Build a batched GQL query — one operation per username
+        queries = []
+        for uname in usernames:
+            queries.append({
+                "query": (
+                    'query{user(login:"' + uname + '")'
+                    "{stream{title game{name}viewersCount}}}"
+                ),
+            })
+        payload = json.dumps(queries).encode("utf-8")
+        req = urllib.request.Request(
+            "https://gql.twitch.tv/gql",
+            data=payload,
+            headers={
+                "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            results = json.loads(resp.read().decode("utf-8"))
+        data = {}
+        for uname, result in zip(usernames, results):
+            user = result.get("data", {}).get("user")
+            if not user:
+                data[uname] = {"is_live": False}
+                continue
+            stream = user.get("stream")
+            if stream:
+                data[uname] = {
+                    "is_live": True,
+                    "title": stream.get("title", ""),
+                    "game": (stream.get("game") or {}).get("name", ""),
+                    "viewers": stream.get("viewersCount", 0),
+                }
+            else:
+                data[uname] = {"is_live": False}
+        _twitch_cache["data"] = data
+        _twitch_cache["timestamp"] = now_ts
+    except Exception:
+        pass
+    finally:
+        _twitch_cache["fetching"] = False
+
+
+def get_twitch_status(url):
+    """Return a tooltip string for a Twitch channel, or None."""
+    uname = _twitch_username(url)
+    if not uname:
+        return None
+    # Auto-refresh if cache is stale
+    now_ts = int(time.time())
+    if now_ts - _twitch_cache["timestamp"] > 120 and not _twitch_cache["fetching"]:
+        ch_list = _twitch_cache.get("channels")
+        if ch_list:
+            threading.Thread(
+                target=_fetch_twitch_status, args=(ch_list,), daemon=True
+            ).start()
+    info = _twitch_cache["data"].get(uname)
+    if info is None:
+        return None
+    if info["is_live"]:
+        lines = ["LIVE"]
+        if info.get("game"):
+            lines[0] += f" - {info['game']}"
+        if info.get("title"):
+            lines.append(info["title"])
+        if info.get("viewers"):
+            lines.append(f"{info['viewers']:,} viewers")
+        return "\n".join(lines)
+    return "Offline"
+
+
+# ---------------------------------------------------------------------------
 # Hover Tooltip
 # ---------------------------------------------------------------------------
 class ToolTip(tk.Toplevel):
@@ -969,7 +1136,7 @@ class ToolTip(tk.Toplevel):
 class ChannelDialog(tk.Toplevel):
     """Modal dialog for adding or editing a channel."""
 
-    def __init__(self, parent, title="Channel", channel=None):
+    def __init__(self, parent, title="Channel", channel=None, all_categories=None):
         super().__init__(parent)
         _set_icon(self)
         self.title(title)
@@ -1010,8 +1177,22 @@ class ChannelDialog(tk.Toplevel):
         self.tvguide_var = tk.StringVar(value=channel.get("tvguide_name", "") if channel else "")
         ttk.Entry(self, textvariable=self.tvguide_var, width=20).grid(row=4, column=1, sticky="w", **pad)
 
+        # Category checkboxes
+        ttk.Label(self, text="Categories:").grid(row=5, column=0, sticky="nw", **pad)
+        cat_frame = ttk.Frame(self)
+        cat_frame.grid(row=5, column=1, sticky="w", **pad)
+        categories = all_categories or []
+        current_cats = channel.get("categories", []) if channel else []
+        self._cat_vars = {}
+        for cat in categories:
+            var = tk.BooleanVar(value=cat in current_cats)
+            self._cat_vars[cat] = var
+            ttk.Checkbutton(cat_frame, text=cat, variable=var).pack(
+                side=tk.LEFT, padx=(0, 8)
+            )
+
         btn_frame = ttk.Frame(self)
-        btn_frame.grid(row=5, column=0, columnspan=2, pady=10)
+        btn_frame.grid(row=6, column=0, columnspan=2, pady=10)
         ttk.Button(btn_frame, text="OK", command=self._ok).pack(side=tk.LEFT, padx=6)
         ttk.Button(btn_frame, text="Cancel", command=self.destroy).pack(side=tk.LEFT, padx=6)
 
@@ -1075,6 +1256,7 @@ class ChannelDialog(tk.Toplevel):
             "name": name,
             "url": self.url_var.get().strip(),
             "logo": self.logo_var.get().strip(),
+            "categories": [cat for cat, var in self._cat_vars.items() if var.get()],
         }
         tvg = self.tvguide_var.get().strip()
         if tvg:
@@ -1093,6 +1275,7 @@ class QuadViewerApp:
         self.root.resizable(True, True)
 
         self.channels = load_channels()
+        _migrate_categories(self.channels)
         self.assignments = {name: None for name in QUADRANTS}
         self.processes = []
         self.active_ports = {}        # quad_name -> CDP debug port
@@ -1108,6 +1291,16 @@ class QuadViewerApp:
 
         # Presets
         self.presets = load_presets()
+
+        # Category settings
+        settings = load_settings()
+        self._show_categories = tk.BooleanVar(
+            value=settings.get("show_categories", False)
+        )
+        self._custom_categories = settings.get("custom_categories", [])
+
+        # Tree item ID -> channel dict mapping (updated by _populate_tree)
+        self._tree_item_map = {}
 
         # Logo image caches (keep references so tkinter doesn't GC them)
         self._logo_small = {}   # logo filename -> PhotoImage (24x24)
@@ -1126,8 +1319,11 @@ class QuadViewerApp:
         self._apply_restored_assignments()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        # Fetch TV schedule in background for hover tooltips
+        # Fetch TV schedule and Twitch status in background for hover tooltips
         threading.Thread(target=_fetch_schedule, daemon=True).start()
+        threading.Thread(
+            target=_fetch_twitch_status, args=(self.channels,), daemon=True
+        ).start()
 
         # Global hotkeys (Ctrl+1..4) — work even when QuadViewer isn't focused
         self._hotkey_thread = threading.Thread(
@@ -1235,7 +1431,7 @@ class QuadViewerApp:
             tree_frame, columns=("name",), show="tree", selectmode="browse"
         )
         self.channel_tree.heading("name", text="Channel", anchor="w")
-        self.channel_tree.column("#0", width=50, minwidth=50, stretch=False)  # logo icon
+        self.channel_tree.column("#0", width=90, minwidth=90, stretch=False)  # logo icon + tree indent
         self.channel_tree.column("name", width=160, anchor="w")
 
         # Row height to fit logo icons + bold left-aligned header
@@ -1250,22 +1446,35 @@ class QuadViewerApp:
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         self.channel_tree.tag_configure("drop_target", background="#1a3a5c")
+        self.channel_tree.tag_configure("category", font=("Segoe UI", 10, "bold"))
         self._drop_line = None  # Canvas line showing insertion point
 
-        self._populate_tree()
+        # Collapse / Expand buttons (visible only in category mode)
+        self._cat_btn_frame = ttk.Frame(left_frame)
+        self._cat_btn_frame.pack(fill=tk.X, pady=(4, 0))
+        ttk.Button(
+            self._cat_btn_frame, text="Collapse All",
+            command=self._collapse_all_categories
+        ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
+        ttk.Button(
+            self._cat_btn_frame, text="Expand All",
+            command=self._expand_all_categories
+        ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
 
         # Channel management buttons
-        mgmt_frame = ttk.Frame(left_frame)
-        mgmt_frame.pack(fill=tk.X, pady=(6, 0))
-        ttk.Button(mgmt_frame, text="Add", command=self._add_channel).pack(
+        self._mgmt_frame = ttk.Frame(left_frame)
+        self._mgmt_frame.pack(fill=tk.X, pady=(6, 0))
+        ttk.Button(self._mgmt_frame, text="Add", command=self._add_channel).pack(
             side=tk.LEFT, padx=2, expand=True, fill=tk.X
         )
-        ttk.Button(mgmt_frame, text="Edit", command=self._edit_channel).pack(
+        ttk.Button(self._mgmt_frame, text="Edit", command=self._edit_channel).pack(
             side=tk.LEFT, padx=2, expand=True, fill=tk.X
         )
-        ttk.Button(mgmt_frame, text="Delete", command=self._delete_channel).pack(
+        ttk.Button(self._mgmt_frame, text="Delete", command=self._delete_channel).pack(
             side=tk.LEFT, padx=2, expand=True, fill=tk.X
         )
+
+        self._populate_tree()
 
         # Bind drag-and-drop events on the treeview
         self.channel_tree.bind("<ButtonPress-1>", self._drag_start)
@@ -1305,6 +1514,8 @@ class QuadViewerApp:
             frame.grid(row=row, column=col, padx=4, pady=4, sticky="nsew")
             self.quad_frames[quad_name] = frame
 
+            btn_frame2 = ttk.Frame(frame)
+            btn_frame2.pack(side=tk.BOTTOM, pady=(2, 0))
             btn_frame = ttk.Frame(frame)
             btn_frame.pack(side=tk.BOTTOM, pady=(6, 0))
 
@@ -1338,19 +1549,31 @@ class QuadViewerApp:
             max_btn.pack(side=tk.LEFT, padx=2)
             self.quad_max_btns[quad_name] = max_btn
             ttk.Button(
-                btn_frame,
+                btn_frame2,
                 text="Switch",
                 command=lambda q=quad_name: self._switch_quadrant(q),
             ).pack(side=tk.LEFT, padx=2)
             ttk.Button(
-                btn_frame,
+                btn_frame2,
                 text="Close",
                 command=lambda q=quad_name: self._close_quadrant(q),
             ).pack(side=tk.LEFT, padx=2)
             ttk.Button(
-                btn_frame,
+                btn_frame2,
                 text="Open",
                 command=lambda q=quad_name: self._open_quadrant(q),
+            ).pack(side=tk.LEFT, padx=2)
+            ttk.Button(
+                btn_frame2,
+                text="\u25c4",
+                width=2,
+                command=lambda q=quad_name: self._move_quad_to_monitor(q, "left"),
+            ).pack(side=tk.LEFT, padx=2)
+            ttk.Button(
+                btn_frame2,
+                text="\u25ba",
+                width=2,
+                command=lambda q=quad_name: self._move_quad_to_monitor(q, "right"),
             ).pack(side=tk.LEFT, padx=2)
 
         # Audio controls
@@ -1373,6 +1596,18 @@ class QuadViewerApp:
         self.root.bind("2", lambda e: self._set_audio_solo("Upper Right"))
         self.root.bind("3", lambda e: self._set_audio_solo("Lower Left"))
         self.root.bind("4", lambda e: self._set_audio_solo("Lower Right"))
+
+        # Move all windows between monitors
+        move_all_frame = ttk.LabelFrame(right_frame, text="Move All Windows", padding=4)
+        move_all_frame.pack(fill=tk.X, pady=(6, 0))
+        ttk.Button(
+            move_all_frame, text="\u25c4 Move All Left",
+            command=lambda: self._move_all_to_monitor("left"),
+        ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
+        ttk.Button(
+            move_all_frame, text="Move All Right \u25ba",
+            command=lambda: self._move_all_to_monitor("right"),
+        ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
 
         # Spectrum IHA toggle
         ttk.Checkbutton(
@@ -1428,12 +1663,89 @@ class QuadViewerApp:
     def _populate_tree(self):
         for item in self.channel_tree.get_children():
             self.channel_tree.delete(item)
+        self._tree_item_map.clear()
+
+        if self._show_categories.get():
+            self._populate_tree_categorized()
+            # Show collapse/expand buttons (position before management buttons)
+            if self._cat_btn_frame not in self._cat_btn_frame.master.pack_slaves():
+                self._cat_btn_frame.pack(fill=tk.X, pady=(4, 0),
+                                         before=self._mgmt_frame)
+        else:
+            self._populate_tree_flat()
+            # Hide collapse/expand buttons
+            self._cat_btn_frame.pack_forget()
+
+    def _populate_tree_flat(self):
+        """Populate channel list as a flat list (no categories)."""
         for ch in self.channels:
             logo = self._get_logo(ch.get("logo", ""), LOGO_SMALL)
             if logo:
-                self.channel_tree.insert("", tk.END, values=(ch["name"],), image=logo)
+                iid = self.channel_tree.insert("", tk.END, values=(ch["name"],), image=logo)
             else:
-                self.channel_tree.insert("", tk.END, values=(ch["name"],))
+                iid = self.channel_tree.insert("", tk.END, values=(ch["name"],))
+            self._tree_item_map[iid] = ch
+
+    def _populate_tree_categorized(self):
+        """Populate channel list grouped by category with parent headers."""
+        # Build category -> channels mapping
+        cat_channels = {}
+        uncategorized = []
+        for ch in self.channels:
+            cats = ch.get("categories", [])
+            if not cats:
+                uncategorized.append(ch)
+            else:
+                for cat in cats:
+                    cat_channels.setdefault(cat, []).append(ch)
+
+        # Insert categories alphabetically
+        for cat_name in sorted(cat_channels.keys()):
+            parent = self.channel_tree.insert(
+                "", tk.END, text=cat_name, values=("",),
+                open=False, tags=("category",)
+            )
+            for ch in cat_channels[cat_name]:
+                logo = self._get_logo(ch.get("logo", ""), LOGO_SMALL)
+                if logo:
+                    iid = self.channel_tree.insert(
+                        parent, tk.END, values=(ch["name"],), image=logo
+                    )
+                else:
+                    iid = self.channel_tree.insert(
+                        parent, tk.END, values=(ch["name"],)
+                    )
+                self._tree_item_map[iid] = ch
+
+        # Uncategorized channels under "Other"
+        if uncategorized:
+            parent = self.channel_tree.insert(
+                "", tk.END, text="Other", values=("",),
+                open=False, tags=("category",)
+            )
+            for ch in uncategorized:
+                logo = self._get_logo(ch.get("logo", ""), LOGO_SMALL)
+                if logo:
+                    iid = self.channel_tree.insert(
+                        parent, tk.END, values=(ch["name"],), image=logo
+                    )
+                else:
+                    iid = self.channel_tree.insert(
+                        parent, tk.END, values=(ch["name"],)
+                    )
+                self._tree_item_map[iid] = ch
+
+    def _collapse_all_categories(self):
+        """Collapse all category headers in the tree."""
+        for item in self.channel_tree.get_children():
+            if "category" in self.channel_tree.item(item, "tags"):
+                self.channel_tree.item(item, open=False)
+
+    def _expand_all_categories(self):
+        """Expand all category headers in the tree."""
+        for item in self.channel_tree.get_children():
+            if "category" in self.channel_tree.item(item, "tags"):
+                self.channel_tree.item(item, open=True)
 
     # ---- Channel hover (programming guide) -----------------------------------
 
@@ -1451,14 +1763,14 @@ class QuadViewerApp:
             )
             return
         self._tooltip_item = item
-        children = list(self.channel_tree.get_children())
-        idx = children.index(item)
-        if idx < 0 or idx >= len(self.channels):
+        ch = self._tree_item_map.get(item)
+        if not ch:
             self._tooltip.hide()
             return
-        ch = self.channels[idx]
         tvg_name = ch.get("tvguide_name")
         info = get_current_show(tvg_name)
+        if not info:
+            info = get_twitch_status(ch.get("url", ""))
         if info:
             self._tooltip.show(info, event.x_root, event.y_root)
         else:
@@ -1475,15 +1787,14 @@ class QuadViewerApp:
         if not item:
             self._drag_channel = None
             return
-        self.channel_tree.selection_set(item)
-        children = self.channel_tree.get_children()
-        tree_idx = list(children).index(item)
-        if 0 <= tree_idx < len(self.channels):
-            self._drag_channel = self.channels[tree_idx]
-            self._drag_source_idx = tree_idx
-        else:
+        ch = self._tree_item_map.get(item)
+        if not ch:
+            # Clicked on a category header — ignore
             self._drag_channel = None
-            self._drag_source_idx = None
+            return
+        self.channel_tree.selection_set(item)
+        self._drag_channel = ch
+        self._drag_source_idx = self.channels.index(ch)
         self._drag_is_reorder = False
 
     def _drag_motion(self, event):
@@ -1498,7 +1809,8 @@ class QuadViewerApp:
         tw = self.channel_tree.winfo_width()
         th = self.channel_tree.winfo_height()
         over_tree = tx <= abs_x <= tx + tw and ty <= abs_y <= ty + th
-        self._drag_is_reorder = over_tree
+        # Disable reorder when categories are shown (ambiguous ordering)
+        self._drag_is_reorder = over_tree and not self._show_categories.get()
 
         if self._drag_indicator is None:
             self._drag_indicator = tk.Toplevel(self.root)
@@ -1522,10 +1834,10 @@ class QuadViewerApp:
 
         # Highlight drop target row when reordering within the list
         self._clear_drop_highlight()
-        if over_tree:
+        if self._drag_is_reorder:
             local_y = abs_y - self.channel_tree.winfo_rooty()
             target_item = self.channel_tree.identify_row(local_y)
-            if target_item:
+            if target_item and self._tree_item_map.get(target_item):
                 children = list(self.channel_tree.get_children())
                 target_idx = children.index(target_item)
                 if target_idx != self._drag_source_idx:
@@ -1579,18 +1891,14 @@ class QuadViewerApp:
         if self._drag_is_reorder:
             local_y = abs_y - self.channel_tree.winfo_rooty()
             target_item = self.channel_tree.identify_row(local_y)
-            if target_item and self._drag_source_idx is not None:
-                children = list(self.channel_tree.get_children())
-                target_idx = children.index(target_item)
+            target_ch = self._tree_item_map.get(target_item) if target_item else None
+            if target_ch and self._drag_source_idx is not None:
+                target_idx = self.channels.index(target_ch)
                 if target_idx != self._drag_source_idx:
                     ch = self.channels.pop(self._drag_source_idx)
                     self.channels.insert(target_idx, ch)
                     save_channels(self.channels)
                     self._populate_tree()
-                    new_children = self.channel_tree.get_children()
-                    if 0 <= target_idx < len(new_children):
-                        self.channel_tree.selection_set(new_children[target_idx])
-                        self.channel_tree.see(new_children[target_idx])
         else:
             for quad_name, frame in self.quad_frames.items():
                 fx = frame.winfo_rootx()
@@ -1606,9 +1914,12 @@ class QuadViewerApp:
         self._cleanup_drag()
 
     def _clear_drop_highlight(self):
-        """Remove the row highlight and insertion line from the treeview."""
+        """Remove the drop_target highlight from treeview rows (preserves category tags)."""
         for item in self.channel_tree.get_children():
-            self.channel_tree.item(item, tags=())
+            current_tags = self.channel_tree.item(item, "tags")
+            if "drop_target" in current_tags:
+                new_tags = tuple(t for t in current_tags if t != "drop_target")
+                self.channel_tree.item(item, tags=new_tags)
         if self._drop_line is not None:
             self._drop_line.withdraw()
 
@@ -1631,8 +1942,17 @@ class QuadViewerApp:
 
     # ---- Channel management ------------------------------------------------
 
+    def _all_categories(self):
+        """Return the full sorted list of available categories (from channels + custom)."""
+        cats = set(self._custom_categories)
+        for ch in self.channels:
+            for cat in ch.get("categories", []):
+                cats.add(cat)
+        return sorted(cats)
+
     def _add_channel(self):
-        dlg = ChannelDialog(self.root, title="Add Channel")
+        dlg = ChannelDialog(self.root, title="Add Channel",
+                            all_categories=self._all_categories())
         self.root.wait_window(dlg)
         if dlg.result:
             self.channels.append(dlg.result)
@@ -1649,11 +1969,12 @@ class QuadViewerApp:
         if not sel:
             messagebox.showwarning("No Selection", "Select a channel to edit.")
             return
-        children = list(self.channel_tree.get_children())
-        idx = children.index(sel[0])
-        if idx < 0 or idx >= len(self.channels):
+        ch = self._tree_item_map.get(sel[0])
+        if not ch:
             return
-        dlg = ChannelDialog(self.root, title="Edit Channel", channel=self.channels[idx])
+        idx = self.channels.index(ch)
+        dlg = ChannelDialog(self.root, title="Edit Channel", channel=ch,
+                            all_categories=self._all_categories())
         self.root.wait_window(dlg)
         if dlg.result:
             old_name = self.channels[idx]["name"]
@@ -1678,14 +1999,14 @@ class QuadViewerApp:
         if not sel:
             messagebox.showwarning("No Selection", "Select a channel to delete.")
             return
-        children = list(self.channel_tree.get_children())
-        idx = children.index(sel[0])
-        if idx < 0 or idx >= len(self.channels):
+        ch = self._tree_item_map.get(sel[0])
+        if not ch:
             return
-        name = self.channels[idx]["name"]
+        name = ch["name"]
         if not messagebox.askyesno("Confirm Delete", f"Delete '{name}'?"):
             return
-        removed = self.channels.pop(idx)
+        removed = ch
+        self.channels.remove(removed)
         save_channels(self.channels)
         self._populate_tree()
         for q, ch in self.assignments.items():
@@ -1701,11 +2022,11 @@ class QuadViewerApp:
         if not sel:
             messagebox.showwarning("No Selection", "Select a channel from the list first.")
             return None
-        children = list(self.channel_tree.get_children())
-        idx = children.index(sel[0])
-        if 0 <= idx < len(self.channels):
-            return self.channels[idx]
-        return None
+        ch = self._tree_item_map.get(sel[0])
+        if not ch:
+            messagebox.showwarning("No Selection", "Select a channel, not a category header.")
+            return None
+        return ch
 
     def _set_quadrant(self, quad_name):
         channel = self._get_selected_channel()
@@ -2041,6 +2362,33 @@ class QuadViewerApp:
                 daemon=True,
             ).start()
 
+    def _move_quad_to_monitor(self, quad_name, direction):
+        """Move a quadrant's Chrome window to the next monitor (left or right)."""
+        pid = self.active_pids.get(quad_name)
+        if pid:
+            threading.Thread(
+                target=move_window_to_monitor,
+                args=(pid, direction),
+                daemon=True,
+            ).start()
+
+    def _move_all_to_monitor(self, direction):
+        """Move all active Chrome windows to the next monitor sequentially."""
+        pids = [pid for pid in self.active_pids.values() if pid]
+        if pids:
+            threading.Thread(
+                target=self._move_all_thread,
+                args=(pids, direction),
+                daemon=True,
+            ).start()
+
+    @staticmethod
+    def _move_all_thread(pids, direction):
+        """Background thread: move each window with a small delay between them."""
+        for pid in pids:
+            move_window_to_monitor(pid, direction)
+            time.sleep(0.3)
+
     def _toggle_maximize(self, quad_name):
         """Toggle a quadrant's window between maximized (fullscreen) and original size."""
         port = self.active_ports.get(quad_name)
@@ -2374,7 +2722,7 @@ class QuadViewerApp:
     # ---- Preferences --------------------------------------------------------
 
     def _show_preferences(self):
-        """Show the Preferences dialog with theme picker."""
+        """Show the Preferences dialog with theme picker and category settings."""
         win = tk.Toplevel(self.root)
         _set_icon(win)
         win.title("Preferences")
@@ -2384,11 +2732,11 @@ class QuadViewerApp:
 
         pad = {"padx": 10, "pady": 6}
 
+        # --- Theme section ---
         ttk.Label(win, text="Visual Theme:", font=("Segoe UI", 10)).grid(
             row=0, column=0, sticky="w", **pad
         )
 
-        # Use ttkbootstrap's own style object (not bare ttk.Style())
         tbs_style = self.root.style
         all_themes = sorted([
             "cosmo", "flatly", "litera", "minty", "lumen", "sandstone", "yeti",
@@ -2404,7 +2752,6 @@ class QuadViewerApp:
         )
         theme_combo.grid(row=0, column=1, **pad)
 
-        # Live preview
         preview_label = ttk.Label(win, text="")
         preview_label.grid(row=1, column=0, columnspan=2, **pad)
 
@@ -2418,22 +2765,90 @@ class QuadViewerApp:
 
         theme_combo.bind("<<ComboboxSelected>>", on_theme_change)
 
+        # --- Category section ---
+        ttk.Separator(win, orient="horizontal").grid(
+            row=2, column=0, columnspan=2, sticky="ew", pady=8
+        )
+
+        show_cat_var = tk.BooleanVar(value=self._show_categories.get())
+        ttk.Checkbutton(
+            win, text="Group channels by category",
+            variable=show_cat_var,
+        ).grid(row=3, column=0, columnspan=2, sticky="w", **pad)
+
+        ttk.Label(win, text="Categories:", font=("Segoe UI", 10)).grid(
+            row=4, column=0, sticky="nw", **pad
+        )
+
+        cat_frame = ttk.Frame(win)
+        cat_frame.grid(row=4, column=1, sticky="w", **pad)
+
+        cat_listbox = tk.Listbox(cat_frame, height=5, width=25)
+        cat_listbox.pack(side=tk.LEFT)
+        for cat in self._all_categories():
+            cat_listbox.insert(tk.END, cat)
+
+        cat_btn_frame = ttk.Frame(cat_frame)
+        cat_btn_frame.pack(side=tk.LEFT, padx=(6, 0))
+
+        def add_category():
+            name = simpledialog.askstring(
+                "Add Category", "Category name:", parent=win
+            )
+            if not name or not name.strip():
+                return
+            name = name.strip()
+            existing = [cat_listbox.get(i).lower() for i in range(cat_listbox.size())]
+            if name.lower() in existing:
+                messagebox.showwarning(
+                    "Duplicate", f"Category '{name}' already exists.", parent=win
+                )
+                return
+            cat_listbox.insert(tk.END, name)
+            # Re-sort the listbox
+            items = sorted([cat_listbox.get(i) for i in range(cat_listbox.size())])
+            cat_listbox.delete(0, tk.END)
+            for item in items:
+                cat_listbox.insert(tk.END, item)
+
+        def delete_category():
+            sel = cat_listbox.curselection()
+            if not sel:
+                return
+            cat_listbox.delete(sel[0])
+
+        ttk.Button(cat_btn_frame, text="Add", command=add_category).pack(
+            fill=tk.X, pady=2
+        )
+        ttk.Button(cat_btn_frame, text="Delete", command=delete_category).pack(
+            fill=tk.X, pady=2
+        )
+
+        # --- Buttons ---
         def apply_and_close():
             chosen = theme_var.get()
             try:
                 tbs_style.theme_use(chosen)
             except Exception:
                 pass
+            # Gather categories from listbox
+            cats = [cat_listbox.get(i) for i in range(cat_listbox.size())]
+            self._custom_categories = cats
+
             settings = load_settings()
             settings["theme"] = chosen
+            settings["show_categories"] = show_cat_var.get()
+            settings["custom_categories"] = cats
             save_settings(settings)
-            # Re-apply hover style for the new theme
+
+            self._show_categories.set(show_cat_var.get())
+            self._populate_tree()
+
             tbs_style.configure("Hover.TLabelframe", background="#1a3a5c")
             tbs_style.configure("Hover.TLabelframe.Label", background="#1a3a5c")
             win.destroy()
 
         def cancel():
-            # Restore original theme
             try:
                 tbs_style.theme_use(current_theme)
             except Exception:
@@ -2441,7 +2856,7 @@ class QuadViewerApp:
             win.destroy()
 
         btn_frame = ttk.Frame(win)
-        btn_frame.grid(row=2, column=0, columnspan=2, pady=10)
+        btn_frame.grid(row=5, column=0, columnspan=2, pady=10)
         ttk.Button(btn_frame, text="OK", command=apply_and_close).pack(
             side=tk.LEFT, padx=6
         )
@@ -2515,6 +2930,16 @@ class QuadViewerApp:
             "Load     - Restore a previously saved preset.\n"
             "Overwrite- Update an existing preset with current assignments.\n"
             "Delete   - Remove a saved preset.\n\n"
+            "CATEGORIES\n"
+            "----------\n"
+            "Channels can be organized into categories.\n\n"
+            "Enable   - Go to Options > Preferences and check 'Group channels\n"
+            "           by category' to show category headers in the list.\n"
+            "Assign   - When adding or editing a channel, check the categories\n"
+            "           it belongs to. A channel can be in multiple categories.\n"
+            "Manage   - Add or delete categories in Preferences.\n"
+            "Other    - Channels with no category appear under 'Other'.\n"
+            "Note     - Drag-to-reorder is disabled when categories are shown.\n\n"
             "PROGRAMMING GUIDE\n"
             "-----------------\n"
             "Hover over a channel in the list to see what's currently airing\n"
@@ -2530,7 +2955,7 @@ class QuadViewerApp:
         win = tk.Toplevel(self.root)
         _set_icon(win)
         win.title("DevCon QuadViewer Help")
-        win.geometry("600x520")
+        win.geometry("600x600")
         win.transient(self.root)
         text = tk.Text(
             win, wrap=tk.WORD, padx=12, pady=12,
@@ -2578,7 +3003,7 @@ class QuadViewerApp:
 
         about_text = (
             "DevCon QuadViewer\n"
-            "Version 1.1\n\n"
+            "Version 1.2\n\n"
             "by DevCon Productions\n"
             "Cleveland, Ohio, USA\n\n"
             "Copyright \u00a9 2026 by DevCon Productions\n"
@@ -2679,6 +3104,7 @@ class QuadViewerApp:
                     lf.write(base64.b64decode(b64))
         # Reload into the running app
         self.channels = load_channels()
+        _migrate_categories(self.channels)
         self._populate_tree()
         self.presets = load_presets()
         self._refresh_preset_combo()
