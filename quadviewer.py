@@ -608,33 +608,132 @@ def bring_os_window_to_front(pid):
     return False
 
 
+def _find_hwnd_by_pid(pid):
+    """Find the first visible window handle belonging to a process ID."""
+    user32 = ctypes.windll.user32
+    WNDENUMPROC = ctypes.WINFUNCTYPE(
+        ctypes.wintypes.BOOL, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM
+    )
+    found_hwnd = ctypes.wintypes.HWND(0)
+    target_pid = ctypes.wintypes.DWORD()
+
+    def enum_cb(hwnd, _):
+        nonlocal found_hwnd
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(target_pid))
+        if target_pid.value == pid:
+            found_hwnd = hwnd
+            return False
+        return True
+
+    user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+    return found_hwnd if found_hwnd else None
+
+
+def _get_all_monitors():
+    """Return a list of monitor work-area rects sorted left-to-right.
+
+    Each entry is (left, top, right, bottom) of the monitor's work area.
+    """
+    user32 = ctypes.windll.user32
+
+    class RECT(ctypes.Structure):
+        _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                     ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+    class MONITORINFO(ctypes.Structure):
+        _fields_ = [("cbSize", ctypes.wintypes.DWORD),
+                     ("rcMonitor", RECT), ("rcWork", RECT),
+                     ("dwFlags", ctypes.wintypes.DWORD)]
+
+    monitors = []
+    MONITORENUMPROC = ctypes.WINFUNCTYPE(
+        ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+        ctypes.POINTER(RECT), ctypes.c_void_p
+    )
+
+    def enum_cb(hMonitor, hdc, lprcMonitor, dwData):
+        mi = MONITORINFO()
+        mi.cbSize = ctypes.sizeof(MONITORINFO)
+        user32.GetMonitorInfoW(hMonitor, ctypes.byref(mi))
+        w = mi.rcWork
+        monitors.append((w.left, w.top, w.right, w.bottom))
+        return 1
+
+    user32.EnumDisplayMonitors(None, None, MONITORENUMPROC(enum_cb), 0)
+    monitors.sort(key=lambda m: m[0])  # sort left-to-right
+    return monitors
+
+
 def move_window_to_monitor(pid, direction):
-    """Move a Chrome window to the next monitor via Win+Shift+Arrow.
+    """Move a Chrome window to the next monitor using the Windows API.
 
     direction should be "left" or "right".
+    Finds the window's current monitor, then repositions it to the
+    equivalent location on the adjacent monitor.  Wraps around.
     """
-    # First bring the window to the foreground so it receives the hotkey
-    if not bring_os_window_to_front(pid):
-        return
-    time.sleep(0.15)
+    try:
+        hwnd = _find_hwnd_by_pid(pid)
+        if not hwnd:
+            return
 
-    user32 = ctypes.windll.user32
-    VK_LWIN = 0x5B
-    VK_SHIFT = 0x10
-    VK_LEFT = 0x25
-    VK_RIGHT = 0x27
-    KEYEVENTF_KEYUP = 0x0002
+        user32 = ctypes.windll.user32
 
-    arrow = VK_LEFT if direction == "left" else VK_RIGHT
+        # Get current window rect
+        class RECT(ctypes.Structure):
+            _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                         ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
 
-    # Press Win+Shift+Arrow
-    user32.keybd_event(VK_LWIN, 0, 0, 0)
-    user32.keybd_event(VK_SHIFT, 0, 0, 0)
-    user32.keybd_event(arrow, 0, 0, 0)
-    # Release in reverse order
-    user32.keybd_event(arrow, 0, KEYEVENTF_KEYUP, 0)
-    user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)
-    user32.keybd_event(VK_LWIN, 0, KEYEVENTF_KEYUP, 0)
+        win_rect = RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(win_rect))
+        win_w = win_rect.right - win_rect.left
+        win_h = win_rect.bottom - win_rect.top
+
+        monitors = _get_all_monitors()
+        if len(monitors) < 2:
+            return
+
+        # Find which monitor the window center is on
+        cx = (win_rect.left + win_rect.right) // 2
+        cy = (win_rect.top + win_rect.bottom) // 2
+        cur_idx = 0
+        for i, (ml, mt, mr, mb) in enumerate(monitors):
+            if ml <= cx < mr and mt <= cy < mb:
+                cur_idx = i
+                break
+
+        # Pick target monitor (wrap around)
+        if direction == "right":
+            tgt_idx = (cur_idx + 1) % len(monitors)
+        else:
+            tgt_idx = (cur_idx - 1) % len(monitors)
+
+        src = monitors[cur_idx]
+        tgt = monitors[tgt_idx]
+
+        # Map the window's relative position from source to target monitor
+        src_w = src[2] - src[0]
+        src_h = src[3] - src[1]
+        tgt_w = tgt[2] - tgt[0]
+        tgt_h = tgt[3] - tgt[1]
+
+        # Relative position within source monitor (as fraction)
+        rel_x = (win_rect.left - src[0]) / src_w if src_w else 0
+        rel_y = (win_rect.top - src[1]) / src_h if src_h else 0
+
+        new_x = int(tgt[0] + rel_x * tgt_w)
+        new_y = int(tgt[1] + rel_y * tgt_h)
+
+        # Scale window size proportionally if monitors differ in size
+        new_w = int(win_w * tgt_w / src_w) if src_w else win_w
+        new_h = int(win_h * tgt_h / src_h) if src_h else win_h
+
+        SWP_NOZORDER = 0x0004
+        user32.SetWindowPos(hwnd, None, new_x, new_y, new_w, new_h, SWP_NOZORDER)
+
+    except Exception:
+        pass
 
 
 # The JavaScript to inject into each Chrome page.
