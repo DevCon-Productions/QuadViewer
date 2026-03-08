@@ -216,6 +216,7 @@
     "name": "Sky News",
     "url": "https://www.youtube.com/watch?v=YDvsBbKfLPA",
     "logo": "skynews.png",
+    "youtube_handle": "@SkyNews",
     "categories": [
       "YouTube"
     ]
@@ -257,6 +258,7 @@
     "name": "Al Jazeera",
     "url": "https://www.youtube.com/watch?v=gCNeDWCI0vo",
     "logo": "aljazeera.png",
+    "youtube_handle": "@AlJazeeraEnglish",
     "categories": [
       "News",
       "YouTube"
@@ -266,6 +268,7 @@
     "name": "LiveNOW from FOX",
     "url": "https://www.youtube.com/watch?v=oGHnGB3ID44",
     "logo": "livenowfox.png",
+    "youtube_handle": "@LiveNOWFOX",
     "categories": [
       "News",
       "YouTube"
@@ -275,6 +278,7 @@
     "name": "NHK World-Japan",
     "url": "https://www.youtube.com/watch?v=f0lYkdA-Gtw",
     "logo": "nhkworld.png",
+    "youtube_handle": "@NHKWORLDJAPAN",
     "categories": [
       "News",
       "YouTube"
@@ -284,6 +288,7 @@
     "name": "NASA Int Space Station",
     "url": "https://www.youtube.com/watch?v=aB1yRz0HhdY",
     "logo": "nasa.png",
+    "youtube_handle": "@NASA",
     "categories": [
       "News",
       "YouTube"
@@ -411,6 +416,7 @@
     "name": "Times Square",
     "url": "https://www.youtube.com/watch?v=rnXIjl_Rzy4",
     "logo": "NYC.jpg",
+    "youtube_search": "EarthCam Times Square live",
     "categories": [
       "Webcams"
     ]
@@ -427,6 +433,7 @@
     "name": "Brooklyn Bridge",
     "url": "https://www.youtube.com/watch?v=pEuK-UAtT3s",
     "logo": "NYC.jpg",
+    "youtube_search": "EarthCam Brooklyn Bridge live",
     "categories": [
       "Webcams"
     ]
@@ -435,6 +442,7 @@
     "name": "Coney Island",
     "url": "https://www.youtube.com/watch?v=xHLEKR3_8iI",
     "logo": "NYC.jpg",
+    "youtube_search": "EarthCam Coney Island live",
     "categories": [
       "Webcams"
     ]
@@ -443,6 +451,7 @@
     "name": "Chicago Skydeck",
     "url": "https://www.youtube.com/watch?v=sQxL8t0gtu8",
     "logo": "Chicago.jpg",
+    "youtube_search": "EarthCam Chicago Skydeck live",
     "categories": [
       "Webcams"
     ]
@@ -451,6 +460,7 @@
     "name": "Dublin, Ireland",
     "url": "https://www.youtube.com/watch?v=u4UZ4UvZXrg",
     "logo": "Dublin.jpg",
+    "youtube_search": "EarthCam Dublin Ireland live",
     "categories": [
       "Webcams"
     ]
@@ -459,6 +469,7 @@
     "name": "Western Wall Jerusalem",
     "url": "https://www.youtube.com/watch?v=0jEa0FOw6vE",
     "logo": "Jerusalem.png",
+    "youtube_search": "Western Wall Jerusalem live",
     "categories": [
       "Webcams"
     ]
@@ -500,6 +511,7 @@
     "name": "Toronto Pearson Intl Airport",
     "url": "https://www.youtube.com/watch?v=8VnN1JGbjrA",
     "logo": "TorontoPearson.jpg",
+    "youtube_search": "Toronto Pearson Airport live",
     "categories": [
       "Airports",
       "Webcams"
@@ -509,6 +521,7 @@
     "name": "LAX Runways 25L and 25R",
     "url": "https://www.youtube.com/watch?v=UQaSS4_VAV4",
     "logo": "LAX.jpg",
+    "youtube_search": "LAX runway 25 live",
     "categories": [
       "Airports",
       "Webcams"
@@ -518,6 +531,7 @@
     "name": "LAX Runways 24L and 24R",
     "url": "https://www.youtube.com/watch?v=VjqKog3XwZ8",
     "logo": "LAX.jpg",
+    "youtube_search": "LAX runway 24 live",
     "categories": [
       "Airports",
       "Webcams"
@@ -527,6 +541,7 @@
     "name": "LAS Runways 26R and 26L",
     "url": "https://www.youtube.com/watch?v=cn8_34TuMaM",
     "logo": "LAS.jpg",
+    "youtube_search": "Las Vegas airport runway live",
     "categories": [
       "Airports",
       "Webcams"
@@ -544,6 +559,7 @@
     "name": "Sydney (Harbour)",
     "url": "https://www.youtube.com/watch?v=5uZa3-RMFos",
     "logo": "Sydney.jpg",
+    "youtube_search": "Sydney Harbour live cam",
     "categories": [
       "Webcams"
     ]
@@ -569,6 +585,7 @@
     "name": "Paris (Seine & Notre Dame)",
     "url": "https://www.youtube.com/watch?v=4GCTq0j2O0U",
     "logo": "Paris.jpg",
+    "youtube_search": "Paris Seine Notre Dame live cam",
     "categories": [
       "Webcams"
     ]

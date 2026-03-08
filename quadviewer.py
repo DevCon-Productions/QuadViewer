@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 import http.client
 import json
 import os
+import re
 import socket
 import struct
 import subprocess
@@ -65,6 +66,10 @@ QUAD_PROFILE_NAMES = {
     "Upper Right": "quad_ur",
     "Lower Left": "quad_ll",
     "Lower Right": "quad_lr",
+    "P2 Upper Left": "quad_p2_ul",
+    "P2 Upper Right": "quad_p2_ur",
+    "P2 Lower Left": "quad_p2_ll",
+    "P2 Lower Right": "quad_p2_lr",
 }
 
 # Base port for Chrome remote debugging (each quadrant gets base + offset)
@@ -74,6 +79,10 @@ CDP_PORT_OFFSETS = {
     "Upper Right": 1,
     "Lower Left": 2,
     "Lower Right": 3,
+    "P2 Upper Left": 4,
+    "P2 Upper Right": 5,
+    "P2 Lower Left": 6,
+    "P2 Lower Right": 7,
 }
 
 # Profile name to auto-select on Fubo / Spectrum
@@ -200,6 +209,13 @@ QUADRANTS = {
     "Lower Left":  (0, 1),
     "Lower Right": (1, 1),
 }
+PANEL2_QUADRANTS = {
+    "P2 Upper Left":  (0, 0),
+    "P2 Upper Right": (1, 0),
+    "P2 Lower Left":  (0, 1),
+    "P2 Lower Right": (1, 1),
+}
+ALL_QUADRANTS = {**QUADRANTS, **PANEL2_QUADRANTS}
 
 
 # Windows 11 invisible border (DWM shadow) adds ~7-8px on each side.
@@ -240,7 +256,7 @@ def get_work_area():
 
 
 def get_quadrant_rect(quad_name, work_x, work_y, work_w, work_h):
-    col, row = QUADRANTS[quad_name]
+    col, row = ALL_QUADRANTS[quad_name]
     half_w = work_w // 2
     half_h = work_h // 2
     x = work_x + col * half_w - WIN_BORDER
@@ -270,14 +286,14 @@ def get_smart_rects(active_quads, work_x, work_y, work_w, work_h):
         )}
 
     if n == 2:
-        cols = [QUADRANTS[q][0] for q in names]
-        rows = [QUADRANTS[q][1] for q in names]
+        cols = [ALL_QUADRANTS[q][0] for q in names]
+        rows = [ALL_QUADRANTS[q][1] for q in names]
 
         if rows[0] == rows[1]:
             # Same row -> side by side, full height each
             rects = {}
             for q in names:
-                col = QUADRANTS[q][0]
+                col = ALL_QUADRANTS[q][0]
                 x = work_x + col * (work_w // 2) - WIN_BORDER
                 y = work_y - WIN_BORDER
                 w = work_w // 2 + 2 * WIN_BORDER
@@ -289,7 +305,7 @@ def get_smart_rects(active_quads, work_x, work_y, work_w, work_h):
             # Same column -> stacked, full width each
             rects = {}
             for q in names:
-                row = QUADRANTS[q][1]
+                row = ALL_QUADRANTS[q][1]
                 x = work_x - WIN_BORDER
                 y = work_y + row * (work_h // 2) - WIN_BORDER
                 w = work_w + 2 * WIN_BORDER
@@ -299,7 +315,7 @@ def get_smart_rects(active_quads, work_x, work_y, work_w, work_h):
 
         # Diagonal -> side by side, ordered left/right by column
         rects = {}
-        sorted_names = sorted(names, key=lambda q: QUADRANTS[q][0])
+        sorted_names = sorted(names, key=lambda q: ALL_QUADRANTS[q][0])
         for i, q in enumerate(sorted_names):
             x = work_x + i * (work_w // 2) - WIN_BORDER
             y = work_y - WIN_BORDER
@@ -1197,6 +1213,239 @@ def get_twitch_status(url):
 
 
 # ---------------------------------------------------------------------------
+# YouTube live-stream URL cache (scrapes channel page, no API key needed)
+# ---------------------------------------------------------------------------
+YOUTUBE_CACHE_TTL = 300  # seconds (5 minutes)
+
+_youtube_cache = {
+    "timestamp": 0,         # last fetch unix time
+    "data": {},             # youtube_handle -> {url, is_live, title}
+    "fetching": False,
+    "channels": None,       # reference to channel list for auto-refresh
+}
+
+
+def _resolve_youtube_live(handle):
+    """Resolve a YouTube channel handle to the current live stream URL.
+
+    Fetches the channel's /streams page, parses ytInitialData from the HTML,
+    and looks for videos with a LIVE_NOW badge.
+
+    Returns {url, is_live, title}.
+    """
+    clean = handle.lstrip("@")
+    page_url = f"https://www.youtube.com/@{clean}/streams"
+    req = urllib.request.Request(page_url, headers={
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        return {"url": None, "is_live": False, "title": ""}
+
+    # Extract the ytInitialData JSON blob embedded in the page
+    match = re.search(
+        r'var\s+ytInitialData\s*=\s*(\{.*?\});\s*</script>', html, re.DOTALL
+    )
+    if not match:
+        return {"url": None, "is_live": False, "title": ""}
+    try:
+        yt_data = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return {"url": None, "is_live": False, "title": ""}
+
+    # Navigate: contents > twoColumnBrowseResultsRenderer > tabs[] > tab content
+    #           > richGridRenderer > contents[] > richItemRenderer > videoRenderer
+    try:
+        tabs = yt_data["contents"]["twoColumnBrowseResultsRenderer"]["tabs"]
+    except (KeyError, TypeError):
+        return {"url": None, "is_live": False, "title": ""}
+
+    for tab in tabs:
+        tab_content = tab.get("tabRenderer", {}).get("content", {})
+        grid = tab_content.get("richGridRenderer", {})
+        for item in grid.get("contents", []):
+            renderer = (
+                item.get("richItemRenderer", {})
+                    .get("content", {})
+                    .get("videoRenderer", {})
+            )
+            if not renderer:
+                continue
+            # Check thumbnailOverlays for LIVE status
+            is_live = False
+            for ov in renderer.get("thumbnailOverlays", []):
+                status = ov.get("thumbnailOverlayTimeStatusRenderer", {})
+                if status.get("style") == "LIVE":
+                    is_live = True
+                    break
+            if is_live:
+                video_id = renderer.get("videoId", "")
+                title_runs = renderer.get("title", {}).get("runs", [])
+                title = title_runs[0].get("text", "") if title_runs else ""
+                if video_id:
+                    return {
+                        "url": f"https://www.youtube.com/watch?v={video_id}",
+                        "is_live": True,
+                        "title": title,
+                    }
+
+    return {"url": None, "is_live": False, "title": ""}
+
+
+def _resolve_youtube_search(query):
+    """Search YouTube with a 'Live' filter and return the first live result.
+
+    Returns {url, is_live, title}.
+    """
+    encoded = urllib.request.quote(query)
+    # sp=EgJAAQ%3D%3D is YouTube's 'Live' filter
+    page_url = f"https://www.youtube.com/results?search_query={encoded}&sp=EgJAAQ%3D%3D"
+    req = urllib.request.Request(page_url, headers={
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+    except Exception:
+        return {"url": None, "is_live": False, "title": ""}
+
+    match = re.search(
+        r'var\s+ytInitialData\s*=\s*(\{.*?\});\s*</script>', html, re.DOTALL
+    )
+    if not match:
+        return {"url": None, "is_live": False, "title": ""}
+    try:
+        yt_data = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return {"url": None, "is_live": False, "title": ""}
+
+    try:
+        sections = (
+            yt_data["contents"]["twoColumnSearchResultsRenderer"]
+            ["primaryContents"]["sectionListRenderer"]["contents"]
+        )
+    except (KeyError, TypeError):
+        return {"url": None, "is_live": False, "title": ""}
+
+    for section in sections:
+        items = section.get("itemSectionRenderer", {}).get("contents", [])
+        for item in items:
+            vr = item.get("videoRenderer", {})
+            if not vr:
+                continue
+            is_live = any(
+                b.get("metadataBadgeRenderer", {}).get("style")
+                == "BADGE_STYLE_TYPE_LIVE_NOW"
+                for b in vr.get("badges", [])
+            )
+            if is_live:
+                video_id = vr.get("videoId", "")
+                title_runs = vr.get("title", {}).get("runs", [])
+                title = title_runs[0].get("text", "") if title_runs else ""
+                if video_id:
+                    return {
+                        "url": f"https://www.youtube.com/watch?v={video_id}",
+                        "is_live": True,
+                        "title": title,
+                    }
+
+    return {"url": None, "is_live": False, "title": ""}
+
+
+def _fetch_youtube_live_urls(channels):
+    """Resolve live stream URLs for all YouTube channels with handles or search terms."""
+    now_ts = int(time.time())
+    if _youtube_cache["data"] and now_ts - _youtube_cache["timestamp"] < YOUTUBE_CACHE_TTL:
+        return
+    if _youtube_cache["fetching"]:
+        return
+    _youtube_cache["fetching"] = True
+    _youtube_cache["channels"] = channels
+    try:
+        data = {}
+        for ch in channels:
+            handle = ch.get("youtube_handle", "")
+            search = ch.get("youtube_search", "")
+            if handle and handle not in data:
+                data[handle] = _resolve_youtube_live(handle)
+            if search and search not in data:
+                data[search] = _resolve_youtube_search(search)
+        _youtube_cache["data"] = data
+        _youtube_cache["timestamp"] = int(time.time())
+    except Exception:
+        pass
+    finally:
+        _youtube_cache["fetching"] = False
+
+
+def _youtube_cache_key(channel):
+    """Return the cache key for a YouTube channel (handle or search term), or None."""
+    return channel.get("youtube_handle", "") or channel.get("youtube_search", "") or None
+
+
+def _youtube_auto_refresh():
+    """Trigger a background refresh if the YouTube cache is stale."""
+    now_ts = int(time.time())
+    if now_ts - _youtube_cache["timestamp"] > YOUTUBE_CACHE_TTL and not _youtube_cache["fetching"]:
+        ch_list = _youtube_cache.get("channels")
+        if ch_list:
+            threading.Thread(
+                target=_fetch_youtube_live_urls, args=(ch_list,), daemon=True
+            ).start()
+
+
+def get_youtube_live_url(channel):
+    """Return the resolved live URL for a YouTube channel, or None."""
+    key = _youtube_cache_key(channel)
+    if not key:
+        return None
+    _youtube_auto_refresh()
+    info = _youtube_cache["data"].get(key)
+    if info and info.get("url"):
+        return info["url"]
+    return None
+
+
+def get_youtube_status(channel):
+    """Return a tooltip string for a YouTube channel's live status, or None."""
+    key = _youtube_cache_key(channel)
+    if not key:
+        return None
+    _youtube_auto_refresh()
+    info = _youtube_cache["data"].get(key)
+    if info is None:
+        return None
+    if info.get("is_live"):
+        lines = ["LIVE"]
+        if info.get("title"):
+            lines.append(info["title"])
+        return "\n".join(lines)
+    return "Not currently live"
+
+
+def _get_launch_url(channel):
+    """Return the URL to launch for a channel.
+
+    For YouTube channels with a youtube_handle, returns the resolved live
+    stream URL if available. Falls back to the stored URL.
+    """
+    resolved = get_youtube_live_url(channel)
+    if resolved:
+        return resolved
+    return channel.get("url", "")
+
+
+# ---------------------------------------------------------------------------
 # Hover Tooltip
 # ---------------------------------------------------------------------------
 class ToolTip(tk.Toplevel):
@@ -1276,10 +1525,28 @@ class ChannelDialog(tk.Toplevel):
         self.tvguide_var = tk.StringVar(value=channel.get("tvguide_name", "") if channel else "")
         ttk.Entry(self, textvariable=self.tvguide_var, width=20).grid(row=4, column=1, sticky="w", **pad)
 
+        # YouTube handle (optional, for single-stream channels)
+        ttk.Label(self, text="YouTube Handle:").grid(row=5, column=0, sticky="w", **pad)
+        self.yt_handle_var = tk.StringVar(
+            value=channel.get("youtube_handle", "") if channel else ""
+        )
+        ttk.Entry(self, textvariable=self.yt_handle_var, width=20).grid(
+            row=5, column=1, sticky="w", **pad
+        )
+
+        # YouTube search (optional, for multi-stream channels / webcams)
+        ttk.Label(self, text="YouTube Search:").grid(row=6, column=0, sticky="w", **pad)
+        self.yt_search_var = tk.StringVar(
+            value=channel.get("youtube_search", "") if channel else ""
+        )
+        ttk.Entry(self, textvariable=self.yt_search_var, width=50).grid(
+            row=6, column=1, sticky="w", **pad
+        )
+
         # Category checkboxes
-        ttk.Label(self, text="Categories:").grid(row=5, column=0, sticky="nw", **pad)
+        ttk.Label(self, text="Categories:").grid(row=7, column=0, sticky="nw", **pad)
         cat_frame = ttk.Frame(self)
-        cat_frame.grid(row=5, column=1, sticky="w", **pad)
+        cat_frame.grid(row=7, column=1, sticky="w", **pad)
         categories = all_categories or []
         current_cats = channel.get("categories", []) if channel else []
         self._cat_vars = {}
@@ -1291,7 +1558,7 @@ class ChannelDialog(tk.Toplevel):
             )
 
         btn_frame = ttk.Frame(self)
-        btn_frame.grid(row=6, column=0, columnspan=2, pady=10)
+        btn_frame.grid(row=8, column=0, columnspan=2, pady=10)
         ttk.Button(btn_frame, text="OK", command=self._ok).pack(side=tk.LEFT, padx=6)
         ttk.Button(btn_frame, text="Cancel", command=self.destroy).pack(side=tk.LEFT, padx=6)
 
@@ -1360,6 +1627,12 @@ class ChannelDialog(tk.Toplevel):
         tvg = self.tvguide_var.get().strip()
         if tvg:
             result["tvguide_name"] = tvg
+        yt_handle = self.yt_handle_var.get().strip()
+        if yt_handle:
+            result["youtube_handle"] = yt_handle
+        yt_search = self.yt_search_var.get().strip()
+        if yt_search:
+            result["youtube_search"] = yt_search
         self.result = result
         self.destroy()
 
@@ -1375,7 +1648,7 @@ class QuadViewerApp:
 
         self.channels = load_channels()
         _migrate_categories(self.channels)
-        self.assignments = {name: None for name in QUADRANTS}
+        self.assignments = {name: None for name in ALL_QUADRANTS}
         self.processes = []
         self.active_ports = {}        # quad_name -> CDP debug port
         self.active_pids = {}         # quad_name -> Chrome process ID
@@ -1423,6 +1696,9 @@ class QuadViewerApp:
         threading.Thread(
             target=_fetch_twitch_status, args=(self.channels,), daemon=True
         ).start()
+        threading.Thread(
+            target=_fetch_youtube_live_urls, args=(self.channels,), daemon=True
+        ).start()
 
         # Global hotkeys (Ctrl+1..4) — work even when QuadViewer isn't focused
         self._hotkey_thread = threading.Thread(
@@ -1433,7 +1709,7 @@ class QuadViewerApp:
     def _restore_assignments(self):
         """Load saved quadrant assignments from disk."""
         saved = load_assignments()
-        for quad_name in QUADRANTS:
+        for quad_name in ALL_QUADRANTS:
             idx = saved.get(quad_name)
             if idx is not None and 0 <= idx < len(self.channels):
                 self.assignments[quad_name] = self.channels[idx]
@@ -1492,6 +1768,95 @@ class QuadViewerApp:
         self._logo_large.pop(logo_filename, None)
 
     # ---- GUI construction --------------------------------------------------
+
+    def _build_panel_tab(self, parent, positions, audio_label, panel_prefix):
+        """Build a 2x2 quadrant grid + audio buttons + Move All for one panel tab."""
+        grid_frame = ttk.Frame(parent)
+        grid_frame.pack(fill=tk.BOTH, expand=True)
+        grid_frame.columnconfigure(0, weight=1)
+        grid_frame.columnconfigure(1, weight=1)
+        grid_frame.rowconfigure(0, weight=1)
+        grid_frame.rowconfigure(1, weight=1)
+
+        for quad_name, row, col in positions:
+            display_name = quad_name.removeprefix("P2 ") if panel_prefix else quad_name
+            frame = ttk.LabelFrame(grid_frame, text=display_name, padding=8)
+            frame.grid(row=row, column=col, padx=4, pady=4, sticky="nsew")
+            self.quad_frames[quad_name] = frame
+
+            btn_frame2 = ttk.Frame(frame)
+            btn_frame2.pack(side=tk.BOTTOM, pady=(2, 0))
+            btn_frame = ttk.Frame(frame)
+            btn_frame.pack(side=tk.BOTTOM, pady=(6, 0))
+
+            label = ttk.Label(frame, text="(empty)", anchor="center", width=18)
+            label.pack(side=tk.BOTTOM, pady=(0, 2))
+
+            logo_label = ttk.Label(frame, anchor="center")
+            logo_label.pack(side=tk.TOP, pady=(2, 0))
+            self.quad_logos[quad_name] = logo_label
+            self.quad_labels[quad_name] = label
+            ttk.Button(
+                btn_frame, text="Set",
+                command=lambda q=quad_name: self._set_quadrant(q),
+            ).pack(side=tk.LEFT, padx=2)
+            ttk.Button(
+                btn_frame, text="Clear",
+                command=lambda q=quad_name: self._clear_quadrant(q),
+            ).pack(side=tk.LEFT, padx=2)
+            ttk.Button(
+                btn_frame, text="Front",
+                command=lambda q=quad_name: self._bring_quad_to_front(q),
+            ).pack(side=tk.LEFT, padx=2)
+            max_btn = ttk.Button(
+                btn_frame, text="Max",
+                command=lambda q=quad_name: self._toggle_maximize(q),
+            )
+            max_btn.pack(side=tk.LEFT, padx=2)
+            self.quad_max_btns[quad_name] = max_btn
+            ttk.Button(
+                btn_frame2, text="Switch",
+                command=lambda q=quad_name: self._switch_quadrant(q),
+            ).pack(side=tk.LEFT, padx=2)
+            ttk.Button(
+                btn_frame2, text="Close",
+                command=lambda q=quad_name: self._close_quadrant(q),
+            ).pack(side=tk.LEFT, padx=2)
+            ttk.Button(
+                btn_frame2, text="Open",
+                command=lambda q=quad_name: self._open_quadrant(q),
+            ).pack(side=tk.LEFT, padx=2)
+            ttk.Button(
+                btn_frame2, text="\u25c4", width=2,
+                command=lambda q=quad_name: self._move_quad_to_monitor(q, "left"),
+            ).pack(side=tk.LEFT, padx=2)
+            ttk.Button(
+                btn_frame2, text="\u25ba", width=2,
+                command=lambda q=quad_name: self._move_quad_to_monitor(q, "right"),
+            ).pack(side=tk.LEFT, padx=2)
+
+        # Audio controls
+        audio_frame = ttk.LabelFrame(parent, text=audio_label, padding=4)
+        audio_frame.pack(fill=tk.X, pady=(6, 0))
+        short_names = ["Upper Left", "Upper Right", "Lower Left", "Lower Right"]
+        for i, short in enumerate(short_names, 1):
+            quad_name = panel_prefix + short
+            ttk.Button(
+                audio_frame, text=f"{i}: {short}",
+                command=lambda q=quad_name: self._set_audio_solo(q),
+            ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
+
+        # Move all windows for this panel
+        move_frame = ttk.LabelFrame(parent, text="Move All Windows", padding=4)
+        move_frame.pack(fill=tk.X, pady=(6, 0))
+        ttk.Button(
+            move_frame, text="\u25c4 Move All Left",
+            command=lambda p=panel_prefix: self._move_all_to_monitor("left", p),
+        ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
+        ttk.Button(
+            move_frame, text="Move All Right \u25ba",
+            command=lambda p=panel_prefix: self._move_all_to_monitor("right", p),
+        ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
 
     def _build_gui(self):
         # Menu bar
@@ -1590,123 +1955,40 @@ class QuadViewerApp:
         right_frame = ttk.Frame(main, padding=4)
         right_frame.grid(row=0, column=1, sticky="nsew", padx=(3, 0))
 
-        grid_frame = ttk.Frame(right_frame)
-        grid_frame.pack(fill=tk.BOTH, expand=True)
-
         self.quad_labels = {}
         self.quad_logos = {}    # quad_name -> ttk.Label for logo image
         self.quad_frames = {}
         self.quad_max_btns = {}  # quad_name -> ttk.Button for Max/Shrink
-        positions = [
-            ("Upper Left", 0, 0),
-            ("Upper Right", 0, 1),
-            ("Lower Left", 1, 0),
-            ("Lower Right", 1, 1),
-        ]
-        grid_frame.columnconfigure(0, weight=1)
-        grid_frame.columnconfigure(1, weight=1)
-        grid_frame.rowconfigure(0, weight=1)
-        grid_frame.rowconfigure(1, weight=1)
 
-        for quad_name, row, col in positions:
-            frame = ttk.LabelFrame(grid_frame, text=quad_name, padding=8)
-            frame.grid(row=row, column=col, padx=4, pady=4, sticky="nsew")
-            self.quad_frames[quad_name] = frame
+        # Notebook with Panel 1 / Panel 2 tabs
+        notebook = ttk.Notebook(right_frame)
+        notebook.pack(fill=tk.BOTH, expand=True)
 
-            btn_frame2 = ttk.Frame(frame)
-            btn_frame2.pack(side=tk.BOTTOM, pady=(2, 0))
-            btn_frame = ttk.Frame(frame)
-            btn_frame.pack(side=tk.BOTTOM, pady=(6, 0))
+        p1_tab = ttk.Frame(notebook, padding=4)
+        p2_tab = ttk.Frame(notebook, padding=4)
+        notebook.add(p1_tab, text="Panel 1")
+        notebook.add(p2_tab, text="Panel 2")
 
-            label = ttk.Label(frame, text="(empty)", anchor="center", width=18)
-            label.pack(side=tk.BOTTOM, pady=(0, 2))
+        self._build_panel_tab(
+            p1_tab,
+            [("Upper Left", 0, 0), ("Upper Right", 0, 1),
+             ("Lower Left", 1, 0), ("Lower Right", 1, 1)],
+            "Audio (Ctrl+1-4, 0=Mute)  |  Max/Shrink (Ctrl+5-8)  |  App/TV (Ctrl+9)",
+            panel_prefix="",
+        )
+        self._build_panel_tab(
+            p2_tab,
+            [("P2 Upper Left", 0, 0), ("P2 Upper Right", 0, 1),
+             ("P2 Lower Left", 1, 0), ("P2 Lower Right", 1, 1)],
+            "Audio (Alt+1-4, 0=Mute)  |  Max/Shrink (Alt+5-8)",
+            panel_prefix="P2 ",
+        )
 
-            logo_label = ttk.Label(frame, anchor="center")
-            logo_label.pack(side=tk.TOP, pady=(2, 0))
-            self.quad_logos[quad_name] = logo_label
-            self.quad_labels[quad_name] = label
-            ttk.Button(
-                btn_frame,
-                text="Set",
-                command=lambda q=quad_name: self._set_quadrant(q),
-            ).pack(side=tk.LEFT, padx=2)
-            ttk.Button(
-                btn_frame,
-                text="Clear",
-                command=lambda q=quad_name: self._clear_quadrant(q),
-            ).pack(side=tk.LEFT, padx=2)
-            ttk.Button(
-                btn_frame,
-                text="Front",
-                command=lambda q=quad_name: self._bring_quad_to_front(q),
-            ).pack(side=tk.LEFT, padx=2)
-            max_btn = ttk.Button(
-                btn_frame,
-                text="Max",
-                command=lambda q=quad_name: self._toggle_maximize(q),
-            )
-            max_btn.pack(side=tk.LEFT, padx=2)
-            self.quad_max_btns[quad_name] = max_btn
-            ttk.Button(
-                btn_frame2,
-                text="Switch",
-                command=lambda q=quad_name: self._switch_quadrant(q),
-            ).pack(side=tk.LEFT, padx=2)
-            ttk.Button(
-                btn_frame2,
-                text="Close",
-                command=lambda q=quad_name: self._close_quadrant(q),
-            ).pack(side=tk.LEFT, padx=2)
-            ttk.Button(
-                btn_frame2,
-                text="Open",
-                command=lambda q=quad_name: self._open_quadrant(q),
-            ).pack(side=tk.LEFT, padx=2)
-            ttk.Button(
-                btn_frame2,
-                text="\u25c4",
-                width=2,
-                command=lambda q=quad_name: self._move_quad_to_monitor(q, "left"),
-            ).pack(side=tk.LEFT, padx=2)
-            ttk.Button(
-                btn_frame2,
-                text="\u25ba",
-                width=2,
-                command=lambda q=quad_name: self._move_quad_to_monitor(q, "right"),
-            ).pack(side=tk.LEFT, padx=2)
-
-        # Audio controls
-        audio_frame = ttk.LabelFrame(right_frame, text="Audio (Ctrl+1-4, 0=Mute)  |  Max/Shrink (Ctrl+5-8)  |  App/TV (Ctrl+9)", padding=4)
-        audio_frame.pack(fill=tk.X, pady=(6, 0))
-        audio_map = [
-            ("1: Upper Left", "Upper Left"),
-            ("2: Upper Right", "Upper Right"),
-            ("3: Lower Left", "Lower Left"),
-            ("4: Lower Right", "Lower Right"),
-        ]
-        for label_text, quad_name in audio_map:
-            ttk.Button(
-                audio_frame, text=label_text,
-                command=lambda q=quad_name: self._set_audio_solo(q),
-            ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
-
-        # Keyboard shortcuts for audio
+        # Keyboard shortcuts for audio (Panel 1 only, in-app)
         self.root.bind("1", lambda e: self._set_audio_solo("Upper Left"))
         self.root.bind("2", lambda e: self._set_audio_solo("Upper Right"))
         self.root.bind("3", lambda e: self._set_audio_solo("Lower Left"))
         self.root.bind("4", lambda e: self._set_audio_solo("Lower Right"))
-
-        # Move all windows between monitors
-        move_all_frame = ttk.LabelFrame(right_frame, text="Move All Windows", padding=4)
-        move_all_frame.pack(fill=tk.X, pady=(6, 0))
-        ttk.Button(
-            move_all_frame, text="\u25c4 Move All Left",
-            command=lambda: self._move_all_to_monitor("left"),
-        ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
-        ttk.Button(
-            move_all_frame, text="Move All Right \u25ba",
-            command=lambda: self._move_all_to_monitor("right"),
-        ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
 
         # Spectrum IHA toggle
         ttk.Checkbutton(
@@ -1870,6 +2152,8 @@ class QuadViewerApp:
         info = get_current_show(tvg_name)
         if not info:
             info = get_twitch_status(ch.get("url", ""))
+        if not info:
+            info = get_youtube_status(ch)
         if info:
             self._tooltip.show(info, event.x_root, event.y_root)
         else:
@@ -1965,6 +2249,8 @@ class QuadViewerApp:
 
         for quad_name, frame in self.quad_frames.items():
             try:
+                if not frame.winfo_ismapped():
+                    continue  # skip frames on hidden notebook tabs
                 if not over_tree:
                     fx = frame.winfo_rootx()
                     fy = frame.winfo_rooty()
@@ -2000,6 +2286,8 @@ class QuadViewerApp:
                     self._populate_tree()
         else:
             for quad_name, frame in self.quad_frames.items():
+                if not frame.winfo_ismapped():
+                    continue  # skip frames on hidden notebook tabs
                 fx = frame.winfo_rootx()
                 fy = frame.winfo_rooty()
                 fw = frame.winfo_width()
@@ -2141,7 +2429,7 @@ class QuadViewerApp:
         self._save_assignments()
 
     def _clear_all_quadrants(self):
-        for quad_name in QUADRANTS:
+        for quad_name in ALL_QUADRANTS:
             self.assignments[quad_name] = None
             self._update_quad_display(quad_name, None)
         self._save_assignments()
@@ -2164,7 +2452,7 @@ class QuadViewerApp:
                 "Use 'Set' or drag a channel first.",
             )
             return
-        url = channel.get("url", "")
+        url = _get_launch_url(channel)
         if not url:
             messagebox.showwarning(
                 "Missing URL",
@@ -2216,7 +2504,7 @@ class QuadViewerApp:
             return
         preset = self.presets[idx]
         assignments = preset.get("assignments", {})
-        for quad_name in QUADRANTS:
+        for quad_name in ALL_QUADRANTS:
             ch_name = assignments.get(quad_name)
             ch = self._channel_by_name(ch_name) if ch_name else None
             self.assignments[quad_name] = ch
@@ -2359,7 +2647,7 @@ class QuadViewerApp:
                 "Use 'Set' or drag a channel first.",
             )
             return
-        url = channel.get("url", "")
+        url = _get_launch_url(channel)
         if not url:
             messagebox.showwarning(
                 "Missing URL", f"No URL set for {channel['name']}.",
@@ -2471,9 +2759,13 @@ class QuadViewerApp:
                 daemon=True,
             ).start()
 
-    def _move_all_to_monitor(self, direction):
-        """Move all active Chrome windows to the next monitor sequentially."""
-        pids = [pid for pid in self.active_pids.values() if pid]
+    def _move_all_to_monitor(self, direction, panel_prefix=""):
+        """Move all active Chrome windows for a panel to the next monitor."""
+        is_p2 = bool(panel_prefix)
+        pids = [
+            pid for q, pid in self.active_pids.items()
+            if pid and q.startswith("P2 ") == is_p2
+        ]
         if pids:
             threading.Thread(
                 target=self._move_all_thread,
@@ -2502,8 +2794,9 @@ class QuadViewerApp:
             # Restore to original rect (don't bring to front)
             self._restore_quad(quad_name, is_spectrum)
         else:
-            # Restore any other maximized window first
-            for other_q in QUADRANTS:
+            # Restore any other maximized window in the same panel first
+            panel_quads = PANEL2_QUADRANTS if quad_name.startswith("P2 ") else QUADRANTS
+            for other_q in panel_quads:
                 if other_q != quad_name and self._quad_maximized.get(other_q, False):
                     other_ch = self.assignments.get(other_q)
                     other_spectrum = "spectrum.net" in (other_ch.get("url", "") if other_ch else "")
@@ -2599,10 +2892,16 @@ class QuadViewerApp:
         for btn in self.quad_max_btns.values():
             btn.config(text="Max")
 
-        rects = get_smart_rects(active, work_x, work_y, work_w, work_h)
+        p1_active = {q: ch for q, ch in active.items() if not q.startswith("P2 ")}
+        p2_active = {q: ch for q, ch in active.items() if q.startswith("P2 ")}
+        rects = {}
+        if p1_active:
+            rects.update(get_smart_rects(p1_active, work_x, work_y, work_w, work_h))
+        if p2_active:
+            rects.update(get_smart_rects(p2_active, work_x, work_y, work_w, work_h))
 
         for quad_name, channel in active.items():
-            url = channel.get("url", "")
+            url = _get_launch_url(channel)
             if not url:
                 messagebox.showwarning(
                     "Missing URL",
@@ -2681,9 +2980,10 @@ class QuadViewerApp:
         return self.UNMUTE_JS
 
     _QUAD_ORDER = ["Upper Left", "Upper Right", "Lower Left", "Lower Right"]
+    _QUAD_ORDER_P2 = ["P2 Upper Left", "P2 Upper Right", "P2 Lower Left", "P2 Lower Right"]
 
     def _hotkey_loop(self):
-        """Background thread: listen for global Ctrl+1..4 hotkeys."""
+        """Background thread: listen for global Ctrl+1..9/0 and Alt+1..8/0 hotkeys."""
         user32 = ctypes.windll.user32
         kernel32 = ctypes.windll.kernel32
 
@@ -2703,20 +3003,27 @@ class QuadViewerApp:
         user32.GetMessageW.restype = ctypes.wintypes.BOOL
 
         MOD_CTRL = 0x0002
+        MOD_ALT = 0x0001
+        VK_0 = 0x30
         VK_1 = 0x31
         WM_HOTKEY = 0x0312
 
-        # Register Ctrl+1..4 (audio), Ctrl+5..8 (maximize), Ctrl+9 (app/tv toggle), Ctrl+0 (mute all)
-        VK_0 = 0x30
+        # Panel 1: Ctrl+1..9 (IDs 1-9), Ctrl+0 (ID 10)
         for i in range(9):
             user32.RegisterHotKey(None, i + 1, MOD_CTRL, VK_1 + i)
         user32.RegisterHotKey(None, 10, MOD_CTRL, VK_0)
+
+        # Panel 2: Alt+1..8 (IDs 11-18), Alt+0 (ID 20)
+        for i in range(8):
+            user32.RegisterHotKey(None, 11 + i, MOD_ALT, VK_1 + i)
+        user32.RegisterHotKey(None, 20, MOD_ALT, VK_0)
 
         # Blocking message loop — GetMessageW returns 0 on WM_QUIT
         msg = ctypes.wintypes.MSG()
         while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
             if msg.message == WM_HOTKEY:
                 hk_id = msg.wParam
+                # Panel 1: Ctrl hotkeys
                 if 1 <= hk_id <= 4:
                     quad = self._QUAD_ORDER[hk_id - 1]
                     self.root.after(0, self._set_audio_solo, quad)
@@ -2727,9 +3034,18 @@ class QuadViewerApp:
                     self.root.after(0, self._toggle_app_or_tv)
                 elif hk_id == 10:
                     self.root.after(0, self._mute_all)
+                # Panel 2: Alt hotkeys
+                elif 11 <= hk_id <= 14:
+                    quad = self._QUAD_ORDER_P2[hk_id - 11]
+                    self.root.after(0, self._set_audio_solo, quad)
+                elif 15 <= hk_id <= 18:
+                    quad = self._QUAD_ORDER_P2[hk_id - 15]
+                    self.root.after(0, self._toggle_maximize, quad)
+                elif hk_id == 20:
+                    self.root.after(0, self._mute_all)
 
         # Cleanup
-        for i in range(10):
+        for i in range(20):
             user32.UnregisterHotKey(None, i + 1)
 
     def _initial_mute(self):
@@ -3102,7 +3418,7 @@ class QuadViewerApp:
 
         about_text = (
             "DevCon QuadViewer\n"
-            "Version 1.2\n\n"
+            "Version 1.3\n\n"
             "by DevCon Productions\n"
             "Cleveland, Ohio, USA\n\n"
             "Copyright \u00a9 2026 by DevCon Productions\n"
