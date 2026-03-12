@@ -255,6 +255,30 @@ def get_work_area():
     return rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
 
 
+def _clamp_rect_to_screen(x, y, w, h):
+    """Prevent windows from extending past screen edges when taskbar auto-hides.
+
+    The auto-hide taskbar needs a 1-2px trigger zone at the screen edge.
+    If our WIN_BORDER overlap pushes windows past the edge, the taskbar
+    can never reappear.
+    """
+    if not _is_taskbar_autohide():
+        return x, y, w, h
+    scr_w = ctypes.windll.user32.GetSystemMetrics(0)
+    scr_h = ctypes.windll.user32.GetSystemMetrics(1)
+    if x < 0:
+        w += x      # shrink width by the overshoot
+        x = 0
+    if y < 0:
+        h += y
+        y = 0
+    if x + w > scr_w:
+        w = scr_w - x
+    if y + h > scr_h:
+        h = scr_h - y
+    return x, y, w, h
+
+
 def get_quadrant_rect(quad_name, work_x, work_y, work_w, work_h):
     col, row = ALL_QUADRANTS[quad_name]
     half_w = work_w // 2
@@ -263,7 +287,7 @@ def get_quadrant_rect(quad_name, work_x, work_y, work_w, work_h):
     y = work_y + row * half_h - WIN_BORDER
     w = half_w + 2 * WIN_BORDER
     h = half_h + 2 * WIN_BORDER
-    return x, y, w, h
+    return _clamp_rect_to_screen(x, y, w, h)
 
 
 def get_smart_rects(active_quads, work_x, work_y, work_w, work_h):
@@ -278,7 +302,7 @@ def get_smart_rects(active_quads, work_x, work_y, work_w, work_h):
 
     if n == 1:
         # Single window: full screen
-        return {names[0]: (
+        return {names[0]: _clamp_rect_to_screen(
             work_x - WIN_BORDER,
             work_y - WIN_BORDER,
             work_w + 2 * WIN_BORDER,
@@ -298,7 +322,7 @@ def get_smart_rects(active_quads, work_x, work_y, work_w, work_h):
                 y = work_y - WIN_BORDER
                 w = work_w // 2 + 2 * WIN_BORDER
                 h = work_h + 2 * WIN_BORDER
-                rects[q] = (x, y, w, h)
+                rects[q] = _clamp_rect_to_screen(x, y, w, h)
             return rects
 
         if cols[0] == cols[1]:
@@ -310,7 +334,7 @@ def get_smart_rects(active_quads, work_x, work_y, work_w, work_h):
                 y = work_y + row * (work_h // 2) - WIN_BORDER
                 w = work_w + 2 * WIN_BORDER
                 h = work_h // 2 + 2 * WIN_BORDER
-                rects[q] = (x, y, w, h)
+                rects[q] = _clamp_rect_to_screen(x, y, w, h)
             return rects
 
         # Diagonal -> side by side, ordered left/right by column
@@ -321,7 +345,7 @@ def get_smart_rects(active_quads, work_x, work_y, work_w, work_h):
             y = work_y - WIN_BORDER
             w = work_w // 2 + 2 * WIN_BORDER
             h = work_h + 2 * WIN_BORDER
-            rects[q] = (x, y, w, h)
+            rects[q] = _clamp_rect_to_screen(x, y, w, h)
         return rects
 
     # 3 or 4 windows: standard quadrant layout
@@ -2808,6 +2832,7 @@ class QuadViewerApp:
             y = work_y - WIN_BORDER
             w = work_w + 2 * WIN_BORDER
             h = work_h + 2 * WIN_BORDER
+            x, y, w, h = _clamp_rect_to_screen(x, y, w, h)
             pid = self.active_pids.get(quad_name)
             threading.Thread(
                 target=self._do_resize_and_front,
