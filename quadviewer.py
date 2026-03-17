@@ -1759,6 +1759,9 @@ class QuadViewerApp:
             target=_fetch_youtube_live_urls, args=(self.channels,), daemon=True
         ).start()
 
+        # Ensure the window doesn't extend behind the taskbar
+        self.root.after(200, self._fit_to_work_area)
+
         # Global hotkeys (Ctrl+1..4) — work even when QuadViewer isn't focused
         self._hotkey_thread = threading.Thread(
             target=self._hotkey_loop, daemon=True
@@ -2771,6 +2774,35 @@ class QuadViewerApp:
         self.root.attributes("-topmost", True)
         self.root.after(100, lambda: self.root.attributes("-topmost", False))
         self.root.focus_force()
+
+    def _fit_to_work_area(self):
+        """Reposition the window so it doesn't extend behind the taskbar."""
+        self.root.update_idletasks()
+        # Get actual work area (respects visible taskbar)
+        rect = ctypes.wintypes.RECT()
+        ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0)
+        wa_left, wa_top = rect.left, rect.top
+        wa_right, wa_bottom = rect.right, rect.bottom
+
+        win_x = self.root.winfo_x()
+        win_y = self.root.winfo_y()
+        win_w = self.root.winfo_width()
+        win_h = self.root.winfo_height()
+
+        new_x, new_y = win_x, win_y
+
+        # Push window up/left if it extends past the work area edges
+        if win_x + win_w > wa_right:
+            new_x = max(wa_left, wa_right - win_w)
+        if win_y + win_h > wa_bottom:
+            new_y = max(wa_top, wa_bottom - win_h)
+        if new_x < wa_left:
+            new_x = wa_left
+        if new_y < wa_top:
+            new_y = wa_top
+
+        if new_x != win_x or new_y != win_y:
+            self.root.geometry(f"+{new_x}+{new_y}")
 
     def _bring_to_front(self):
         """Bring all Chrome windows to the OS foreground."""
