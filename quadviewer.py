@@ -223,21 +223,23 @@ ALL_QUADRANTS = {**QUADRANTS, **PANEL2_QUADRANTS}
 WIN_BORDER = 8
 
 
+class _APPBARDATA(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", ctypes.wintypes.DWORD),
+        ("hWnd", ctypes.wintypes.HWND),
+        ("uCallbackMessage", ctypes.wintypes.UINT),
+        ("uEdge", ctypes.wintypes.UINT),
+        ("rc", ctypes.wintypes.RECT),
+        ("lParam", ctypes.wintypes.LPARAM),
+    ]
+
+
 def _is_taskbar_autohide():
     """Check if the Windows taskbar is set to auto-hide."""
-    class APPBARDATA(ctypes.Structure):
-        _fields_ = [
-            ("cbSize", ctypes.wintypes.DWORD),
-            ("hWnd", ctypes.wintypes.HWND),
-            ("uCallbackMessage", ctypes.wintypes.UINT),
-            ("uEdge", ctypes.wintypes.UINT),
-            ("rc", ctypes.wintypes.RECT),
-            ("lParam", ctypes.wintypes.LPARAM),
-        ]
     ABM_GETSTATE = 0x00000004
     ABS_AUTOHIDE = 0x0000001
-    abd = APPBARDATA()
-    abd.cbSize = ctypes.sizeof(APPBARDATA)
+    abd = _APPBARDATA()
+    abd.cbSize = ctypes.sizeof(_APPBARDATA)
     state = ctypes.windll.shell32.SHAppBarMessage(ABM_GETSTATE, ctypes.byref(abd))
     return bool(state & ABS_AUTOHIDE)
 
@@ -255,27 +257,60 @@ def get_work_area():
     return rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top
 
 
+def _get_taskbar_edge():
+    """Return the screen edge where the taskbar lives: 0=left,1=top,2=right,3=bottom."""
+    ABM_GETTASKBARPOS = 0x00000005
+    abd = _APPBARDATA()
+    abd.cbSize = ctypes.sizeof(_APPBARDATA)
+    if ctypes.windll.shell32.SHAppBarMessage(ABM_GETTASKBARPOS, ctypes.byref(abd)):
+        return abd.uEdge
+    return 3  # default to bottom
+
+
+def _nudge_taskbar_autohide():
+    """Signal the taskbar to re-evaluate auto-hide after window changes.
+
+    Chrome windows launching can cause the taskbar to appear; this nudge
+    tells the shell that z-order has changed so it should re-check.
+    """
+    if not _is_taskbar_autohide():
+        return
+    ABM_WINDOWPOSCHANGED = 0x00000009
+    abd = _APPBARDATA()
+    abd.cbSize = ctypes.sizeof(_APPBARDATA)
+    ctypes.windll.shell32.SHAppBarMessage(ABM_WINDOWPOSCHANGED, ctypes.byref(abd))
+
+
 def _clamp_rect_to_screen(x, y, w, h):
-    """Prevent windows from extending past screen edges when taskbar auto-hides.
+    """Prevent windows from covering the auto-hide taskbar trigger zone.
 
     The auto-hide taskbar needs a 1-2px trigger zone at the screen edge.
-    If our WIN_BORDER overlap pushes windows past the edge, the taskbar
-    can never reappear.
+    We clamp windows to stay within bounds AND leave a small gap at the
+    taskbar edge so mouse events can reach the trigger zone.
     """
     if not _is_taskbar_autohide():
         return x, y, w, h
     scr_w = ctypes.windll.user32.GetSystemMetrics(0)
     scr_h = ctypes.windll.user32.GetSystemMetrics(1)
-    if x < 0:
-        w += x      # shrink width by the overshoot
-        x = 0
-    if y < 0:
-        h += y
-        y = 0
-    if x + w > scr_w:
-        w = scr_w - x
-    if y + h > scr_h:
-        h = scr_h - y
+
+    # Leave a gap at the taskbar edge so the trigger zone stays exposed
+    TASKBAR_GAP = 2
+    edge = _get_taskbar_edge()
+    min_x = TASKBAR_GAP if edge == 0 else 0   # left
+    min_y = TASKBAR_GAP if edge == 1 else 0   # top
+    max_x = scr_w - TASKBAR_GAP if edge == 2 else scr_w   # right
+    max_y = scr_h - TASKBAR_GAP if edge == 3 else scr_h   # bottom
+
+    if x < min_x:
+        w -= (min_x - x)
+        x = min_x
+    if y < min_y:
+        h -= (min_y - y)
+        y = min_y
+    if x + w > max_x:
+        w = max_x - x
+    if y + h > max_y:
+        h = max_y - y
     return x, y, w, h
 
 
@@ -2980,6 +3015,10 @@ class QuadViewerApp:
                 target=unpause_thread, args=(debug_port, w, h, url), daemon=True
             )
             t2.start()
+
+        # Nudge the auto-hide taskbar after Chrome windows settle
+        if _is_taskbar_autohide():
+            self.root.after(2000, _nudge_taskbar_autohide)
 
         # Set initial audio: mute all except Upper Left after videos load
         if self.active_ports:
