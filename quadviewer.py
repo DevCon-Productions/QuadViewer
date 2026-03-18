@@ -267,18 +267,29 @@ def _get_taskbar_edge():
     return 3  # default to bottom
 
 
-def _nudge_taskbar_autohide():
-    """Signal the taskbar to re-evaluate auto-hide after window changes.
+def _force_taskbar_hide():
+    """Force the auto-hide taskbar to hide after Chrome windows launch.
 
-    Chrome windows launching can cause the taskbar to appear; this nudge
-    tells the shell that z-order has changed so it should re-check.
+    Chrome launching causes the taskbar to appear (normal Windows behavior).
+    We force it back by briefly setting the taskbar window to SW_HIDE, then
+    SW_SHOWNA (show without activating), which resets it to its auto-hidden
+    state.  Falls back to ABM_WINDOWPOSCHANGED if the taskbar isn't found.
     """
     if not _is_taskbar_autohide():
         return
-    ABM_WINDOWPOSCHANGED = 0x00000009
-    abd = _APPBARDATA()
-    abd.cbSize = ctypes.sizeof(_APPBARDATA)
-    ctypes.windll.shell32.SHAppBarMessage(ABM_WINDOWPOSCHANGED, ctypes.byref(abd))
+    user32 = ctypes.windll.user32
+    taskbar = user32.FindWindowW("Shell_TrayWnd", None)
+    if taskbar:
+        SW_HIDE = 0
+        SW_SHOWNA = 8   # show without activating
+        user32.ShowWindow(taskbar, SW_HIDE)
+        time.sleep(0.05)
+        user32.ShowWindow(taskbar, SW_SHOWNA)
+    else:
+        ABM_WINDOWPOSCHANGED = 0x00000009
+        abd = _APPBARDATA()
+        abd.cbSize = ctypes.sizeof(_APPBARDATA)
+        ctypes.windll.shell32.SHAppBarMessage(ABM_WINDOWPOSCHANGED, ctypes.byref(abd))
 
 
 def _clamp_rect_to_screen(x, y, w, h):
@@ -1788,6 +1799,8 @@ class QuadViewerApp:
         else:
             self.quad_labels[quad_name].config(text="(empty)")
             self.quad_logos[quad_name].config(image="")
+        # Re-check fit after content size changes (logos can push the window taller)
+        self.root.after(100, self._fit_to_work_area)
 
     def _apply_restored_assignments(self):
         """Update the GUI labels to reflect restored assignments."""
@@ -2023,7 +2036,8 @@ class QuadViewerApp:
         self.quad_max_btns = {}  # quad_name -> ttk.Button for Max/Shrink
 
         # Notebook with Panel 1 / Panel 2 tabs
-        notebook = ttk.Notebook(right_frame)
+        self.notebook = ttk.Notebook(right_frame)
+        notebook = self.notebook
         notebook.pack(fill=tk.BOTH, expand=True)
 
         p1_tab = ttk.Frame(notebook, padding=4)
@@ -2491,7 +2505,11 @@ class QuadViewerApp:
         self._save_assignments()
 
     def _clear_all_quadrants(self):
-        for quad_name in ALL_QUADRANTS:
+        """Clear all quadrant assignments on the currently visible panel tab."""
+        # Determine which panel tab is selected (index 0 = Panel 1, 1 = Panel 2)
+        selected = self.notebook.index(self.notebook.select())
+        quads = PANEL2_QUADRANTS if selected == 1 else QUADRANTS
+        for quad_name in quads:
             self.assignments[quad_name] = None
             self._update_quad_display(quad_name, None)
         self._save_assignments()
@@ -2776,33 +2794,45 @@ class QuadViewerApp:
         self.root.focus_force()
 
     def _fit_to_work_area(self):
-        """Reposition the window so it doesn't extend behind the taskbar."""
+        """Constrain the window so it doesn't extend behind the taskbar.
+
+        Called on startup and whenever content changes size (e.g. logos loaded).
+        Caps the window height to the work area and repositions if needed.
+        """
         self.root.update_idletasks()
         # Get actual work area (respects visible taskbar)
         rect = ctypes.wintypes.RECT()
         ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0)
         wa_left, wa_top = rect.left, rect.top
-        wa_right, wa_bottom = rect.right, rect.bottom
+        wa_w = rect.right - rect.left
+        wa_h = rect.bottom - rect.top
+
+        # Cap maxsize so the window can never grow past the work area
+        self.root.maxsize(wa_w, wa_h)
 
         win_x = self.root.winfo_x()
         win_y = self.root.winfo_y()
         win_w = self.root.winfo_width()
         win_h = self.root.winfo_height()
 
+        # Shrink window if it exceeds work area
+        new_w = min(win_w, wa_w)
+        new_h = min(win_h, wa_h)
         new_x, new_y = win_x, win_y
 
-        # Push window up/left if it extends past the work area edges
-        if win_x + win_w > wa_right:
-            new_x = max(wa_left, wa_right - win_w)
-        if win_y + win_h > wa_bottom:
-            new_y = max(wa_top, wa_bottom - win_h)
+        # Reposition so the window stays within the work area
+        if new_x + new_w > rect.right:
+            new_x = max(wa_left, rect.right - new_w)
+        if new_y + new_h > rect.bottom:
+            new_y = max(wa_top, rect.bottom - new_h)
         if new_x < wa_left:
             new_x = wa_left
         if new_y < wa_top:
             new_y = wa_top
 
-        if new_x != win_x or new_y != win_y:
-            self.root.geometry(f"+{new_x}+{new_y}")
+        changed = new_x != win_x or new_y != win_y or new_w != win_w or new_h != win_h
+        if changed:
+            self.root.geometry(f"{new_w}x{new_h}+{new_x}+{new_y}")
 
     def _bring_to_front(self):
         """Bring all Chrome windows to the OS foreground."""
@@ -3048,15 +3078,38 @@ class QuadViewerApp:
             )
             t2.start()
 
-        # Nudge the auto-hide taskbar after Chrome windows settle
+        # After Chrome windows settle, re-apply bounds via CDP (Chrome may
+        # have adjusted our --window-position/--window-size at launch) and
+        # nudge the taskbar to re-evaluate auto-hide.
         if _is_taskbar_autohide():
-            self.root.after(2000, _nudge_taskbar_autohide)
+            threading.Thread(
+                target=self._enforce_bounds_after_launch, daemon=True
+            ).start()
 
         # Set initial audio: mute all except Upper Left after videos load
         if self.active_ports:
             threading.Thread(
                 target=self._initial_mute, daemon=True
             ).start()
+
+    def _enforce_bounds_after_launch(self):
+        """Re-apply clamped bounds via CDP after Chrome windows settle.
+
+        Chrome sometimes adjusts --window-position/--window-size at startup,
+        which can push windows back over the taskbar trigger zone.  Wait for
+        Chrome to finish settling, then re-set bounds through CDP.
+        """
+        time.sleep(3)
+        for quad_name, port in list(self.active_ports.items()):
+            rect = self._quad_rects.get(quad_name)
+            if rect:
+                x, y, w, h = rect
+                try:
+                    cdp_set_window_bounds(port, x, y, w, h, retries=2, delay=1)
+                except Exception:
+                    pass
+        time.sleep(1)
+        _force_taskbar_hide()
 
     # ---- Audio control -------------------------------------------------------
 
