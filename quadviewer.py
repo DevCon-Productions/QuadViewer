@@ -267,11 +267,21 @@ def _get_taskbar_edge():
     return 3  # default to bottom
 
 
-def _force_taskbar_hide():
-    """Force the auto-hide taskbar to hide after Chrome windows launch.
+def _restore_taskbar():
+    """Restore the taskbar to its normal visible state (undo SW_HIDE)."""
+    user32 = ctypes.windll.user32
+    taskbar = user32.FindWindowW("Shell_TrayWnd", None)
+    if taskbar:
+        user32.ShowWindow(taskbar, 5)   # SW_SHOW
 
-    SW_HIDE/SW_SHOWNA briefly hides the taskbar window and re-shows it
-    without activating, which resets it to its auto-hidden state.
+
+def _force_taskbar_hide():
+    """Completely hide the taskbar during stream playback.
+
+    SW_HIDE makes the taskbar fully invisible (no 2px auto-hide strip).
+    We call this repeatedly for ~60s to cover the CDP activity window
+    from inject_js_thread and unpause_thread.  After that period, the
+    taskbar returns to normal auto-hide behavior on next user interaction.
     """
     if not _is_taskbar_autohide():
         return
@@ -279,8 +289,6 @@ def _force_taskbar_hide():
     taskbar = user32.FindWindowW("Shell_TrayWnd", None)
     if taskbar:
         user32.ShowWindow(taskbar, 0)   # SW_HIDE
-        time.sleep(0.05)
-        user32.ShowWindow(taskbar, 8)   # SW_SHOWNA (show without activating)
 
 
 def _clamp_rect_to_screen(x, y, w, h):
@@ -3082,15 +3090,13 @@ class QuadViewerApp:
 
         Chrome launching (and CDP activity from inject/unpause threads) repeatedly
         activates Chrome windows, bringing the taskbar back each time.
-        inject_js_thread runs at 8,12,15,20s and unpause_thread at 15,25,35,45s,
-        so we fire hide attempts across that whole window.
+        We hide every 2 seconds for ~60 seconds to cover the full activity window
+        of inject_js_thread (t=0,8,20,35,55s) and unpause_thread (t=15,25,35,45s).
         """
-        delays = [3, 7, 11, 16, 21, 26, 31, 37, 43, 49, 55]
-        last = 0
-        for d in delays:
-            time.sleep(d - last)
-            last = d
+        time.sleep(3)
+        for _ in range(30):
             _force_taskbar_hide()
+            time.sleep(2)
 
     # ---- Audio control -------------------------------------------------------
 
@@ -3662,6 +3668,7 @@ class QuadViewerApp:
                 self._hotkey_thread_id, 0x0012, 0, 0  # WM_QUIT
             )
         self._close_all()
+        _restore_taskbar()
         self.root.destroy()
 
 
