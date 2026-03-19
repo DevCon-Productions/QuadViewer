@@ -3567,7 +3567,7 @@ class QuadViewerApp:
 
         about_text = (
             "DevCon QuadViewer\n"
-            "Version 1.3.2\n\n"
+            "Version 1.3\n\n"
             "by DevCon Productions\n"
             "Cleveland, Ohio, USA\n\n"
             "Copyright \u00a9 2026 by DevCon Productions\n"
@@ -3688,18 +3688,6 @@ class QuadViewerApp:
 # Entry point
 # ---------------------------------------------------------------------------
 def main():
-    # Make the process DPI-aware so GetSystemMetrics / SystemParametersInfo
-    # return real pixel values instead of virtualized (scaled) ones.
-    # Without this, machines with display scaling (common on TVs) get wrong
-    # screen dimensions, causing Chrome windows to overshoot the taskbar zone.
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
-    except Exception:
-        try:
-            ctypes.windll.user32.SetProcessDPIAware()   # fallback for older Windows
-        except Exception:
-            pass
-
     # Set AppUserModelID so Windows shows our icon in the taskbar
     # (without this, Python's default icon is used)
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("DevCon.QuadViewer.1")
