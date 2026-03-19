@@ -3093,23 +3093,19 @@ class QuadViewerApp:
             ).start()
 
     def _enforce_bounds_after_launch(self):
-        """Re-apply clamped bounds via CDP after Chrome windows settle.
+        """Repeatedly nudge the auto-hide taskbar to re-hide after Chrome launches.
 
-        Chrome sometimes adjusts --window-position/--window-size at startup,
-        which can push windows back over the taskbar trigger zone.  Wait for
-        Chrome to finish settling, then re-set bounds through CDP.
+        Chrome launching (and CDP activity from inject/unpause threads) repeatedly
+        activates Chrome windows, bringing the taskbar back each time.
+        inject_js_thread runs at 8,12,15,20s and unpause_thread at 15,25,35,45s,
+        so we fire hide attempts across that whole window.
         """
-        time.sleep(3)
-        for quad_name, port in list(self.active_ports.items()):
-            rect = self._quad_rects.get(quad_name)
-            if rect:
-                x, y, w, h = rect
-                try:
-                    cdp_set_window_bounds(port, x, y, w, h, retries=2, delay=1)
-                except Exception:
-                    pass
-        time.sleep(1)
-        _force_taskbar_hide()
+        delays = [3, 7, 11, 16, 21, 26, 31, 37, 43, 49, 55]
+        last = 0
+        for d in delays:
+            time.sleep(d - last)
+            last = d
+            _force_taskbar_hide()
 
     # ---- Audio control -------------------------------------------------------
 
