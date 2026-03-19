@@ -270,58 +270,43 @@ def _get_taskbar_edge():
 def _force_taskbar_hide():
     """Force the auto-hide taskbar to hide after Chrome windows launch.
 
-    Chrome launching causes the taskbar to appear (normal Windows behavior).
-    We force it back by briefly setting the taskbar window to SW_HIDE, then
-    SW_SHOWNA (show without activating), which resets it to its auto-hidden
-    state.  Falls back to ABM_WINDOWPOSCHANGED if the taskbar isn't found.
+    SW_HIDE/SW_SHOWNA briefly hides the taskbar window and re-shows it
+    without activating, which resets it to its auto-hidden state.
     """
     if not _is_taskbar_autohide():
         return
     user32 = ctypes.windll.user32
     taskbar = user32.FindWindowW("Shell_TrayWnd", None)
     if taskbar:
-        SW_HIDE = 0
-        SW_SHOWNA = 8   # show without activating
-        user32.ShowWindow(taskbar, SW_HIDE)
+        user32.ShowWindow(taskbar, 0)   # SW_HIDE
         time.sleep(0.05)
-        user32.ShowWindow(taskbar, SW_SHOWNA)
-    else:
-        ABM_WINDOWPOSCHANGED = 0x00000009
-        abd = _APPBARDATA()
-        abd.cbSize = ctypes.sizeof(_APPBARDATA)
-        ctypes.windll.shell32.SHAppBarMessage(ABM_WINDOWPOSCHANGED, ctypes.byref(abd))
+        user32.ShowWindow(taskbar, 8)   # SW_SHOWNA (show without activating)
 
 
 def _clamp_rect_to_screen(x, y, w, h):
-    """Prevent windows from covering the auto-hide taskbar trigger zone.
+    """Preserve the auto-hide taskbar trigger zone at the taskbar edge only.
 
-    The auto-hide taskbar needs a 1-2px trigger zone at the screen edge.
-    We clamp windows to stay within bounds AND leave a small gap at the
-    taskbar edge so mouse events can reach the trigger zone.
+    Only adjusts the window rectangle at the taskbar edge to leave a small
+    gap for the trigger zone.  Other edges are left as-is so Chrome receives
+    the full WIN_BORDER overlap values (including negative x/y) which it
+    handles correctly by extending the window slightly off-screen.
     """
     if not _is_taskbar_autohide():
         return x, y, w, h
     scr_w = ctypes.windll.user32.GetSystemMetrics(0)
     scr_h = ctypes.windll.user32.GetSystemMetrics(1)
-
-    # Leave a gap at the taskbar edge so the trigger zone stays exposed
     TASKBAR_GAP = 2
     edge = _get_taskbar_edge()
-    min_x = TASKBAR_GAP if edge == 0 else 0   # left
-    min_y = TASKBAR_GAP if edge == 1 else 0   # top
-    max_x = scr_w - TASKBAR_GAP if edge == 2 else scr_w   # right
-    max_y = scr_h - TASKBAR_GAP if edge == 3 else scr_h   # bottom
-
-    if x < min_x:
-        w -= (min_x - x)
-        x = min_x
-    if y < min_y:
-        h -= (min_y - y)
-        y = min_y
-    if x + w > max_x:
-        w = max_x - x
-    if y + h > max_y:
-        h = max_y - y
+    if edge == 0 and x < TASKBAR_GAP:           # taskbar on left
+        w -= (TASKBAR_GAP - x)
+        x = TASKBAR_GAP
+    elif edge == 1 and y < TASKBAR_GAP:         # taskbar on top
+        h -= (TASKBAR_GAP - y)
+        y = TASKBAR_GAP
+    elif edge == 2 and x + w > scr_w - TASKBAR_GAP:  # taskbar on right
+        w = scr_w - TASKBAR_GAP - x
+    elif edge == 3 and y + h > scr_h - TASKBAR_GAP:  # taskbar on bottom
+        h = scr_h - TASKBAR_GAP - y
     return x, y, w, h
 
 
