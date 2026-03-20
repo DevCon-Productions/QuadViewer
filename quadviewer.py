@@ -292,29 +292,12 @@ def _force_taskbar_hide():
 
 
 def _clamp_rect_to_screen(x, y, w, h):
-    """Preserve the auto-hide taskbar trigger zone at the taskbar edge only.
+    """No-op: formerly clamped windows to preserve the taskbar trigger zone.
 
-    Only adjusts the window rectangle at the taskbar edge to leave a small
-    gap for the trigger zone.  Other edges are left as-is so Chrome receives
-    the full WIN_BORDER overlap values (including negative x/y) which it
-    handles correctly by extending the window slightly off-screen.
+    Now that we use SW_HIDE to force-hide the taskbar during stream playback,
+    no clamping is needed — Chrome correctly handles WIN_BORDER values that
+    extend slightly off-screen (e.g. x=-8) by clipping them to the display.
     """
-    if not _is_taskbar_autohide():
-        return x, y, w, h
-    scr_w = ctypes.windll.user32.GetSystemMetrics(0)
-    scr_h = ctypes.windll.user32.GetSystemMetrics(1)
-    TASKBAR_GAP = 2
-    edge = _get_taskbar_edge()
-    if edge == 0 and x < TASKBAR_GAP:           # taskbar on left
-        w -= (TASKBAR_GAP - x)
-        x = TASKBAR_GAP
-    elif edge == 1 and y < TASKBAR_GAP:         # taskbar on top
-        h -= (TASKBAR_GAP - y)
-        y = TASKBAR_GAP
-    elif edge == 2 and x + w > scr_w - TASKBAR_GAP:  # taskbar on right
-        w = scr_w - TASKBAR_GAP - x
-    elif edge == 3 and y + h > scr_h - TASKBAR_GAP:  # taskbar on bottom
-        h = scr_h - TASKBAR_GAP - y
     return x, y, w, h
 
 
