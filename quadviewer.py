@@ -244,10 +244,14 @@ def _is_taskbar_autohide():
     return bool(state & ABS_AUTOHIDE)
 
 
-def get_work_area():
-    """Get usable screen rectangle. Uses full screen if taskbar is auto-hidden."""
-    if _is_taskbar_autohide():
-        # Taskbar auto-hides: use full screen dimensions
+def get_work_area(force_fullscreen=False):
+    """Get usable screen rectangle.
+
+    Uses full screen if the taskbar is auto-hidden or if force_fullscreen
+    is True (i.e. the user checked 'Hide taskbar' even though auto-hide
+    is not enabled in Windows).
+    """
+    if force_fullscreen or _is_taskbar_autohide():
         w = ctypes.windll.user32.GetSystemMetrics(0)   # SM_CXSCREEN
         h = ctypes.windll.user32.GetSystemMetrics(1)   # SM_CYSCREEN
         return 0, 0, w, h
@@ -283,8 +287,6 @@ def _force_taskbar_hide():
     from inject_js_thread and unpause_thread.  After that period, the
     taskbar returns to normal auto-hide behavior on next user interaction.
     """
-    if not _is_taskbar_autohide():
-        return
     user32 = ctypes.windll.user32
     taskbar = user32.FindWindowW("Shell_TrayWnd", None)
     if taskbar:
@@ -693,10 +695,13 @@ def _find_hwnd_by_pid(pid):
     return found_hwnd if found_hwnd else None
 
 
-def _get_all_monitors():
-    """Return a list of monitor work-area rects sorted left-to-right.
+def _get_all_monitors(use_full_screen=False):
+    """Return a list of monitor rects sorted left-to-right.
 
-    Each entry is (left, top, right, bottom) of the monitor's work area.
+    Each entry is (left, top, right, bottom).
+    If use_full_screen is True, returns the full monitor rect (rcMonitor)
+    instead of the work area (rcWork), so windows fill the entire display
+    including any taskbar space.
     """
     user32 = ctypes.windll.user32
 
@@ -719,8 +724,8 @@ def _get_all_monitors():
         mi = MONITORINFO()
         mi.cbSize = ctypes.sizeof(MONITORINFO)
         user32.GetMonitorInfoW(hMonitor, ctypes.byref(mi))
-        w = mi.rcWork
-        monitors.append((w.left, w.top, w.right, w.bottom))
+        r = mi.rcMonitor if use_full_screen else mi.rcWork
+        monitors.append((r.left, r.top, r.right, r.bottom))
         return 1
 
     user32.EnumDisplayMonitors(None, None, MONITORENUMPROC(enum_cb), 0)
@@ -728,12 +733,13 @@ def _get_all_monitors():
     return monitors
 
 
-def move_window_to_monitor(pid, direction):
+def move_window_to_monitor(pid, direction, use_full_screen=False):
     """Move a Chrome window to the next monitor using the Windows API.
 
     direction should be "left" or "right".
     Finds the window's current monitor, then repositions it to the
     equivalent location on the adjacent monitor.  Wraps around.
+    If use_full_screen is True, uses full monitor rects (ignoring taskbar).
     """
     try:
         hwnd = _find_hwnd_by_pid(pid)
@@ -752,7 +758,7 @@ def move_window_to_monitor(pid, direction):
         win_w = win_rect.right - win_rect.left
         win_h = win_rect.bottom - win_rect.top
 
-        monitors = _get_all_monitors()
+        monitors = _get_all_monitors(use_full_screen)
         if len(monitors) < 2:
             return
 
@@ -1700,8 +1706,10 @@ class QuadViewerApp:
         self.active_pids = {}         # quad_name -> Chrome process ID
         self.audio_quad = "Upper Left"  # currently unmuted quadrant
         self.block_spectrum_iha = tk.BooleanVar(value=True)  # block IHA by default
+        self.hide_taskbar = tk.BooleanVar(value=_is_taskbar_autohide())
 
         self._ctrl9_showing_app = False  # toggle state for Ctrl+9
+        self._closing = False             # signals background threads to stop
 
         # Window maximize state tracking
         self._quad_rects = {}       # quad_name -> (x, y, w, h) original rect
@@ -2047,6 +2055,12 @@ class QuadViewerApp:
             right_frame, text="Block Spectrum auto-login (use saved account)",
             variable=self.block_spectrum_iha,
         ).pack(fill=tk.X, pady=(6, 0))
+
+        # Hide taskbar toggle
+        ttk.Checkbutton(
+            right_frame, text="Hide taskbar while streams are running",
+            variable=self.hide_taskbar,
+        ).pack(fill=tk.X, pady=(2, 0))
 
         # Presets
         preset_frame = ttk.LabelFrame(right_frame, text="Presets", padding=4)
@@ -2718,7 +2732,7 @@ class QuadViewerApp:
             return
 
         # Compute geometry based on all currently active quadrants + this one
-        work_x, work_y, work_w, work_h = get_work_area()
+        work_x, work_y, work_w, work_h = get_work_area(self.hide_taskbar.get())
         x, y, w, h = get_quadrant_rect(quad_name, work_x, work_y, work_w, work_h)
         self._quad_rects[quad_name] = (x, y, w, h)
 
@@ -2850,9 +2864,10 @@ class QuadViewerApp:
         """Move a quadrant's Chrome window to the next monitor (left or right)."""
         pid = self.active_pids.get(quad_name)
         if pid:
+            full = self.hide_taskbar.get()
             threading.Thread(
                 target=move_window_to_monitor,
-                args=(pid, direction),
+                args=(pid, direction, full),
                 daemon=True,
             ).start()
 
@@ -2864,17 +2879,18 @@ class QuadViewerApp:
             if pid and q.startswith("P2 ") == is_p2
         ]
         if pids:
+            full = self.hide_taskbar.get()
             threading.Thread(
                 target=self._move_all_thread,
-                args=(pids, direction),
+                args=(pids, direction, full),
                 daemon=True,
             ).start()
 
     @staticmethod
-    def _move_all_thread(pids, direction):
+    def _move_all_thread(pids, direction, use_full_screen=False):
         """Background thread: move each window with a small delay between them."""
         for pid in pids:
-            move_window_to_monitor(pid, direction)
+            move_window_to_monitor(pid, direction, use_full_screen)
             time.sleep(0.3)
 
     def _toggle_maximize(self, quad_name):
@@ -2900,7 +2916,7 @@ class QuadViewerApp:
                     self._restore_quad(other_q, other_spectrum)
 
             # Maximize to full work area
-            work_x, work_y, work_w, work_h = get_work_area()
+            work_x, work_y, work_w, work_h = get_work_area(self.hide_taskbar.get())
             x = work_x - WIN_BORDER
             y = work_y - WIN_BORDER
             w = work_w + 2 * WIN_BORDER
@@ -2980,7 +2996,7 @@ class QuadViewerApp:
             )
             return
 
-        work_x, work_y, work_w, work_h = get_work_area()
+        work_x, work_y, work_w, work_h = get_work_area(self.hide_taskbar.get())
 
         self._close_all()
         self.active_ports.clear()
@@ -3057,7 +3073,7 @@ class QuadViewerApp:
         # After Chrome windows settle, re-apply bounds via CDP (Chrome may
         # have adjusted our --window-position/--window-size at launch) and
         # nudge the taskbar to re-evaluate auto-hide.
-        if _is_taskbar_autohide():
+        if self.hide_taskbar.get():
             threading.Thread(
                 target=self._enforce_bounds_after_launch, daemon=True
             ).start()
@@ -3078,6 +3094,8 @@ class QuadViewerApp:
         """
         time.sleep(3)
         for _ in range(30):
+            if self._closing:
+                return
             _force_taskbar_hide()
             time.sleep(2)
 
@@ -3252,6 +3270,10 @@ class QuadViewerApp:
         self.processes.clear()
         self.active_ports.clear()
         self.active_pids.clear()
+
+        # Restore taskbar when all streams are closed (but not on app exit)
+        if not self._closing and self.hide_taskbar.get():
+            _restore_taskbar()
 
     # ---- Preferences --------------------------------------------------------
 
@@ -3537,7 +3559,7 @@ class QuadViewerApp:
 
         about_text = (
             "DevCon QuadViewer\n"
-            "Version 1.3\n\n"
+            "Version 1.4\n\n"
             "by DevCon Productions\n"
             "Cleveland, Ohio, USA\n\n"
             "Copyright \u00a9 2026 by DevCon Productions\n"
@@ -3650,8 +3672,11 @@ class QuadViewerApp:
             ctypes.windll.user32.PostThreadMessageW(
                 self._hotkey_thread_id, 0x0012, 0, 0  # WM_QUIT
             )
+        self._closing = True
         self._close_all()
-        _restore_taskbar()
+        if self.hide_taskbar.get():
+            time.sleep(0.5)  # let background thread see _closing flag
+            _restore_taskbar()
         self.root.destroy()
 
 
