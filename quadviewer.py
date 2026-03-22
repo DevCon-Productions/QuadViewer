@@ -1706,9 +1706,6 @@ class QuadViewerApp:
         self.active_pids = {}         # quad_name -> Chrome process ID
         self.audio_quad = "Upper Left"  # currently unmuted quadrant
         self.block_spectrum_iha = tk.BooleanVar(value=True)  # block IHA by default
-        self.hide_taskbar = tk.BooleanVar(
-            value=settings.get("hide_taskbar_default", True)
-        )
 
         self._ctrl9_showing_app = False  # toggle state for Ctrl+9
         self._closing = False             # signals background threads to stop
@@ -1720,8 +1717,11 @@ class QuadViewerApp:
         # Presets
         self.presets = load_presets()
 
-        # Category settings
+        # Settings (categories, taskbar, etc.)
         settings = load_settings()
+        self.hide_taskbar = tk.BooleanVar(
+            value=settings.get("hide_taskbar_default", True)
+        )
         self._show_categories = tk.BooleanVar(
             value=settings.get("show_categories", False)
         )
