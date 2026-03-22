@@ -1832,6 +1832,33 @@ class QuadViewerApp:
 
     def _build_panel_tab(self, parent, positions, audio_label, panel_prefix):
         """Build a 2x2 quadrant grid + audio buttons + Move All for one panel tab."""
+        # Pack bottom controls FIRST so they always stay visible
+        # (Tkinter pack order = space priority).
+
+        # Move all windows for this panel
+        move_frame = ttk.LabelFrame(parent, text="Move All Windows", padding=4)
+        move_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+        ttk.Button(
+            move_frame, text="\u25c4 Move All Left",
+            command=lambda p=panel_prefix: self._move_all_to_monitor("left", p),
+        ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
+        ttk.Button(
+            move_frame, text="Move All Right \u25ba",
+            command=lambda p=panel_prefix: self._move_all_to_monitor("right", p),
+        ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
+
+        # Audio controls
+        audio_frame = ttk.LabelFrame(parent, text=audio_label, padding=4)
+        audio_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+        short_names = ["Upper Left", "Upper Right", "Lower Left", "Lower Right"]
+        for i, short in enumerate(short_names, 1):
+            quad_name_audio = panel_prefix + short
+            ttk.Button(
+                audio_frame, text=f"{i}: {short}",
+                command=lambda q=quad_name_audio: self._set_audio_solo(q),
+            ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
+
+        # Quad grid fills remaining space
         grid_frame = ttk.Frame(parent)
         grid_frame.pack(fill=tk.BOTH, expand=True)
         grid_frame.columnconfigure(0, weight=1)
@@ -1896,28 +1923,8 @@ class QuadViewerApp:
                 command=lambda q=quad_name: self._move_quad_to_monitor(q, "right"),
             ).pack(side=tk.LEFT, padx=2)
 
-        # Audio controls
-        audio_frame = ttk.LabelFrame(parent, text=audio_label, padding=4)
-        audio_frame.pack(fill=tk.X, pady=(6, 0))
-        short_names = ["Upper Left", "Upper Right", "Lower Left", "Lower Right"]
-        for i, short in enumerate(short_names, 1):
-            quad_name = panel_prefix + short
-            ttk.Button(
-                audio_frame, text=f"{i}: {short}",
-                command=lambda q=quad_name: self._set_audio_solo(q),
-            ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
-
-        # Move all windows for this panel
-        move_frame = ttk.LabelFrame(parent, text="Move All Windows", padding=4)
-        move_frame.pack(fill=tk.X, pady=(6, 0))
-        ttk.Button(
-            move_frame, text="\u25c4 Move All Left",
-            command=lambda p=panel_prefix: self._move_all_to_monitor("left", p),
-        ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
-        ttk.Button(
-            move_frame, text="Move All Right \u25ba",
-            command=lambda p=panel_prefix: self._move_all_to_monitor("right", p),
-        ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
+        # (Audio and Move All controls are packed above the grid
+        # with side=BOTTOM so they always stay visible.)
 
     def _build_gui(self):
         # Menu bar
@@ -2021,7 +2028,67 @@ class QuadViewerApp:
         self.quad_frames = {}
         self.quad_max_btns = {}  # quad_name -> ttk.Button for Max/Shrink
 
-        # Notebook with Panel 1 / Panel 2 tabs
+        # Pack bottom controls FIRST so they always get space even if the
+        # quad grid is tall (Tkinter pack order = space priority).
+
+        # Bottom controls (centered)
+        controls = ttk.Frame(right_frame, padding=(0, 8, 0, 0))
+        controls.pack(side=tk.BOTTOM, pady=(4, 0))
+
+        ttk.Button(controls, text="Execute", command=self._execute).pack(
+            side=tk.LEFT, padx=4
+        )
+        ttk.Button(controls, text="Clear All", command=self._clear_all_quadrants).pack(
+            side=tk.LEFT, padx=4
+        )
+        ttk.Button(controls, text="Bring to Front", command=self._bring_to_front).pack(
+            side=tk.LEFT, padx=4
+        )
+        ttk.Button(controls, text="Close All", command=self._close_all).pack(
+            side=tk.LEFT, padx=4
+        )
+        ttk.Button(controls, text="Exit", command=self._on_close).pack(
+            side=tk.LEFT, padx=4
+        )
+
+        # Presets
+        preset_frame = ttk.LabelFrame(right_frame, text="Presets", padding=4)
+        preset_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+
+        self._preset_var = tk.StringVar()
+        self._preset_combo = ttk.Combobox(
+            preset_frame, textvariable=self._preset_var,
+            state="readonly", width=20,
+        )
+        self._preset_combo.pack(side=tk.LEFT, padx=(0, 4), fill=tk.X, expand=True)
+        self._refresh_preset_combo()
+
+        ttk.Button(preset_frame, text="Load", command=self._load_preset).pack(
+            side=tk.LEFT, padx=2
+        )
+        ttk.Button(preset_frame, text="Save", command=self._save_preset).pack(
+            side=tk.LEFT, padx=2
+        )
+        ttk.Button(preset_frame, text="Overwrite", command=self._overwrite_preset).pack(
+            side=tk.LEFT, padx=2
+        )
+        ttk.Button(preset_frame, text="Delete", command=self._delete_preset).pack(
+            side=tk.LEFT, padx=2
+        )
+
+        # Hide taskbar toggle
+        ttk.Checkbutton(
+            right_frame, text="Hide taskbar while streams are running",
+            variable=self.hide_taskbar,
+        ).pack(side=tk.BOTTOM, fill=tk.X, pady=(2, 0))
+
+        # Spectrum IHA toggle
+        ttk.Checkbutton(
+            right_frame, text="Block Spectrum auto-login (use saved account)",
+            variable=self.block_spectrum_iha,
+        ).pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+
+        # Notebook with Panel 1 / Panel 2 tabs (fills remaining space)
         self.notebook = ttk.Notebook(right_frame)
         notebook = self.notebook
         notebook.pack(fill=tk.BOTH, expand=True)
@@ -2052,62 +2119,8 @@ class QuadViewerApp:
         self.root.bind("3", lambda e: self._set_audio_solo("Lower Left"))
         self.root.bind("4", lambda e: self._set_audio_solo("Lower Right"))
 
-        # Spectrum IHA toggle
-        ttk.Checkbutton(
-            right_frame, text="Block Spectrum auto-login (use saved account)",
-            variable=self.block_spectrum_iha,
-        ).pack(fill=tk.X, pady=(6, 0))
-
-        # Hide taskbar toggle
-        ttk.Checkbutton(
-            right_frame, text="Hide taskbar while streams are running",
-            variable=self.hide_taskbar,
-        ).pack(fill=tk.X, pady=(2, 0))
-
-        # Presets
-        preset_frame = ttk.LabelFrame(right_frame, text="Presets", padding=4)
-        preset_frame.pack(fill=tk.X, pady=(6, 0))
-
-        self._preset_var = tk.StringVar()
-        self._preset_combo = ttk.Combobox(
-            preset_frame, textvariable=self._preset_var,
-            state="readonly", width=20,
-        )
-        self._preset_combo.pack(side=tk.LEFT, padx=(0, 4), fill=tk.X, expand=True)
-        self._refresh_preset_combo()
-
-        ttk.Button(preset_frame, text="Load", command=self._load_preset).pack(
-            side=tk.LEFT, padx=2
-        )
-        ttk.Button(preset_frame, text="Save", command=self._save_preset).pack(
-            side=tk.LEFT, padx=2
-        )
-        ttk.Button(preset_frame, text="Overwrite", command=self._overwrite_preset).pack(
-            side=tk.LEFT, padx=2
-        )
-        ttk.Button(preset_frame, text="Delete", command=self._delete_preset).pack(
-            side=tk.LEFT, padx=2
-        )
-
-        # Bottom controls (centered)
-        controls = ttk.Frame(right_frame, padding=(0, 8, 0, 0))
-        controls.pack(pady=(4, 0))
-
-        ttk.Button(controls, text="Execute", command=self._execute).pack(
-            side=tk.LEFT, padx=4
-        )
-        ttk.Button(controls, text="Clear All", command=self._clear_all_quadrants).pack(
-            side=tk.LEFT, padx=4
-        )
-        ttk.Button(controls, text="Bring to Front", command=self._bring_to_front).pack(
-            side=tk.LEFT, padx=4
-        )
-        ttk.Button(controls, text="Close All", command=self._close_all).pack(
-            side=tk.LEFT, padx=4
-        )
-        ttk.Button(controls, text="Exit", command=self._on_close).pack(
-            side=tk.LEFT, padx=4
-        )
+        # (Checkboxes, presets, and bottom controls are packed above
+        # the notebook with side=BOTTOM so they always stay visible.)
 
     def _populate_tree(self):
         for item in self.channel_tree.get_children():
