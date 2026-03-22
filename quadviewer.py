@@ -1706,7 +1706,9 @@ class QuadViewerApp:
         self.active_pids = {}         # quad_name -> Chrome process ID
         self.audio_quad = "Upper Left"  # currently unmuted quadrant
         self.block_spectrum_iha = tk.BooleanVar(value=True)  # block IHA by default
-        self.hide_taskbar = tk.BooleanVar(value=True)
+        self.hide_taskbar = tk.BooleanVar(
+            value=settings.get("hide_taskbar_default", True)
+        )
 
         self._ctrl9_showing_app = False  # toggle state for Ctrl+9
         self._closing = False             # signals background threads to stop
@@ -3380,6 +3382,19 @@ class QuadViewerApp:
             fill=tk.X, pady=2
         )
 
+        # --- Taskbar section ---
+        ttk.Separator(win, orient="horizontal").grid(
+            row=5, column=0, columnspan=2, sticky="ew", pady=8
+        )
+
+        hide_tb_var = tk.BooleanVar(
+            value=load_settings().get("hide_taskbar_default", True)
+        )
+        ttk.Checkbutton(
+            win, text="Hide taskbar by default when streams are running",
+            variable=hide_tb_var,
+        ).grid(row=6, column=0, columnspan=2, sticky="w", **pad)
+
         # --- Buttons ---
         def apply_and_close():
             chosen = theme_var.get()
@@ -3395,6 +3410,7 @@ class QuadViewerApp:
             settings["theme"] = chosen
             settings["show_categories"] = show_cat_var.get()
             settings["custom_categories"] = cats
+            settings["hide_taskbar_default"] = hide_tb_var.get()
             save_settings(settings)
 
             self._show_categories.set(show_cat_var.get())
@@ -3412,7 +3428,7 @@ class QuadViewerApp:
             win.destroy()
 
         btn_frame = ttk.Frame(win)
-        btn_frame.grid(row=5, column=0, columnspan=2, pady=10)
+        btn_frame.grid(row=7, column=0, columnspan=2, pady=10)
         ttk.Button(btn_frame, text="OK", command=apply_and_close).pack(
             side=tk.LEFT, padx=6
         )
