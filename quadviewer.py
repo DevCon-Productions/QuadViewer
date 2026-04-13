@@ -85,6 +85,11 @@ CDP_PORT_OFFSETS = {
     "P2 Lower Right": 7,
 }
 
+# Audio-only stream slot (runs Chrome off-screen for audio without a quadrant)
+AUDIO_SLOT_PROFILE = "audio_slot"
+AUDIO_SLOT_CDP_PORT = CDP_BASE_PORT + 8  # 19228
+AUDIO_SLOT_DEFAULT_URL = "https://www.mlb.com"
+
 # Profile name to auto-select on Fubo / Spectrum
 PROFILE_NAME = "Devon"
 
@@ -1415,34 +1420,66 @@ def _resolve_youtube_search(query):
 
 
 def _fetch_youtube_live_urls(channels):
-    """Resolve live stream URLs for all YouTube channels with handles or search terms."""
+    """Resolve live stream URLs for all YouTube channels with handles or search terms.
+
+    Returns a dict of {cache_key: new_url} for any entries whose resolved URL
+    changed compared to the previous cache contents, or an empty dict.
+    """
     now_ts = int(time.time())
     if _youtube_cache["data"] and now_ts - _youtube_cache["timestamp"] < YOUTUBE_CACHE_TTL:
-        return
+        return {}
     if _youtube_cache["fetching"]:
-        return
+        return {}
     _youtube_cache["fetching"] = True
     _youtube_cache["channels"] = channels
+    changed = {}
     try:
+        old_data = _youtube_cache["data"]
         data = {}
         for ch in channels:
             handle = ch.get("youtube_handle", "")
             search = ch.get("youtube_search", "")
             if handle and handle not in data:
                 data[handle] = _resolve_youtube_live(handle)
-            if search and search not in data:
+            elif search and search not in data:
                 data[search] = _resolve_youtube_search(search)
+            elif not handle and not search:
+                # Auto-derive search for YouTube URLs with no explicit config
+                auto_key = _youtube_cache_key(ch)
+                if auto_key and auto_key not in data:
+                    # Strip the "_auto:" prefix to get the channel name
+                    query = auto_key.removeprefix("_auto:") + " live"
+                    data[auto_key] = _resolve_youtube_search(query)
+        # Detect URL changes
+        for key, info in data.items():
+            new_url = info.get("url")
+            old_url = old_data.get(key, {}).get("url") if old_data else None
+            if new_url and old_url and new_url != old_url:
+                changed[key] = new_url
         _youtube_cache["data"] = data
         _youtube_cache["timestamp"] = int(time.time())
     except Exception:
         pass
     finally:
         _youtube_cache["fetching"] = False
+    return changed
 
 
 def _youtube_cache_key(channel):
-    """Return the cache key for a YouTube channel (handle or search term), or None."""
-    return channel.get("youtube_handle", "") or channel.get("youtube_search", "") or None
+    """Return the cache key for a YouTube channel (handle or search term), or None.
+
+    For channels that have a YouTube URL but no explicit handle/search,
+    auto-generates a search key from the channel name so that newly-added
+    YouTube webcams resolve dynamically without manual configuration.
+    """
+    key = channel.get("youtube_handle", "") or channel.get("youtube_search", "")
+    if key:
+        return key
+    # Auto-derive search from channel name if the URL is a YouTube link
+    url = channel.get("url", "")
+    if ("youtube.com" in url or "youtu.be" in url) and channel.get("name"):
+        return f"_auto:{channel['name']}"
+    return None
 
 
 def _youtube_auto_refresh():
@@ -1454,6 +1491,41 @@ def _youtube_auto_refresh():
             threading.Thread(
                 target=_fetch_youtube_live_urls, args=(ch_list,), daemon=True
             ).start()
+
+
+def _youtube_monitor_loop(app):
+    """Periodically refresh YouTube URLs and auto-navigate quadrants whose
+    stream URL has changed (e.g. channel started a new live broadcast)."""
+    # Initial fetch (populates cache for the first time)
+    _fetch_youtube_live_urls(app.channels)
+
+    while not app._closing:
+        # Sleep in short increments so we can exit promptly on app close
+        for _ in range(YOUTUBE_CACHE_TTL):
+            if app._closing:
+                return
+            time.sleep(1)
+
+        changed = _fetch_youtube_live_urls(app.channels)
+        if not changed or app._closing:
+            continue
+
+        # Check each active quadrant — if its channel's cache key changed,
+        # navigate Chrome to the new URL automatically.
+        for quad_name, port in list(app.active_ports.items()):
+            ch = app.assignments.get(quad_name)
+            if not ch:
+                continue
+            key = _youtube_cache_key(ch)
+            if key and key in changed:
+                new_url = changed[key]
+                start_muted = quad_name != app.audio_quad
+                print(f"[YT Monitor] {ch.get('name', key)}: stream URL changed → navigating {quad_name}")
+                try:
+                    cdp_navigate(port, new_url)
+                    inject_js_thread(port, start_muted=start_muted, url=new_url)
+                except Exception:
+                    pass
 
 
 def get_youtube_live_url(channel):
@@ -1710,6 +1782,11 @@ class QuadViewerApp:
         self._ctrl9_showing_app = False  # toggle state for Ctrl+9
         self._closing = False             # signals background threads to stop
 
+        # Audio-only stream slot (Chrome off-screen, audio only)
+        self._audio_slot_proc = None      # subprocess.Popen
+        self._audio_slot_port = None      # CDP debug port
+        self._audio_slot_muted = False    # mute state
+
         # Window maximize state tracking
         self._quad_rects = {}       # quad_name -> (x, y, w, h) original rect
         self._quad_maximized = {}   # quad_name -> bool
@@ -1753,7 +1830,7 @@ class QuadViewerApp:
             target=_fetch_twitch_status, args=(self.channels,), daemon=True
         ).start()
         threading.Thread(
-            target=_fetch_youtube_live_urls, args=(self.channels,), daemon=True
+            target=_youtube_monitor_loop, args=(self,), daemon=True
         ).start()
 
         # Ensure the window doesn't extend behind the taskbar
@@ -2044,7 +2121,7 @@ class QuadViewerApp:
         ttk.Button(controls, text="Bring to Front", command=self._bring_to_front).pack(
             side=tk.LEFT, padx=4
         )
-        ttk.Button(controls, text="Close All", command=self._close_all).pack(
+        ttk.Button(controls, text="Close All", command=self._close_panel).pack(
             side=tk.LEFT, padx=4
         )
         ttk.Button(controls, text="Exit", command=self._on_close).pack(
@@ -2082,6 +2159,44 @@ class QuadViewerApp:
             variable=self.hide_taskbar,
         ).pack(side=tk.BOTTOM, fill=tk.X, pady=(2, 0))
 
+        # Audio-only stream slot
+        audio_frame = ttk.LabelFrame(right_frame, text="Audio Stream (Alt+9 Mute, Ctrl+Alt+M Mute All)", padding=4)
+        audio_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(6, 0))
+
+        # URL combo row (editable, with history)
+        url_row = ttk.Frame(audio_frame)
+        url_row.pack(fill=tk.X, pady=(0, 4))
+        ttk.Label(url_row, text="URL:").pack(side=tk.LEFT, padx=(0, 4))
+        self._audio_slot_url_var = tk.StringVar(value=AUDIO_SLOT_DEFAULT_URL)
+        self._audio_slot_url_history = load_settings().get(
+            "audio_slot_urls", [AUDIO_SLOT_DEFAULT_URL]
+        )
+        self._audio_slot_combo = ttk.Combobox(
+            url_row, textvariable=self._audio_slot_url_var,
+            values=self._audio_slot_url_history,
+        )
+        self._audio_slot_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Button row
+        btn_row = ttk.Frame(audio_frame)
+        btn_row.pack(fill=tk.X)
+        self._audio_slot_btns = {}
+        btn = ttk.Button(btn_row, text="Launch", command=self._audio_slot_launch)
+        btn.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
+        self._audio_slot_btns["launch"] = btn
+        btn = ttk.Button(btn_row, text="Hide", command=self._audio_slot_hide, state="disabled")
+        btn.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
+        self._audio_slot_btns["hide"] = btn
+        btn = ttk.Button(btn_row, text="Show", command=self._audio_slot_show, state="disabled")
+        btn.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
+        self._audio_slot_btns["show"] = btn
+        btn = ttk.Button(btn_row, text="Mute", command=self._audio_slot_toggle_mute, state="disabled")
+        btn.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
+        self._audio_slot_btns["mute"] = btn
+        btn = ttk.Button(btn_row, text="Stop", command=self._audio_slot_stop, state="disabled")
+        btn.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
+        self._audio_slot_btns["stop"] = btn
+
         # Spectrum IHA toggle
         ttk.Checkbutton(
             right_frame, text="Block Spectrum auto-login (use saved account)",
@@ -2109,7 +2224,7 @@ class QuadViewerApp:
             p2_tab,
             [("P2 Upper Left", 0, 0), ("P2 Upper Right", 0, 1),
              ("P2 Lower Left", 1, 0), ("P2 Lower Right", 1, 1)],
-            "Audio (Alt+1-4, 0=Mute)  |  Max/Shrink (Alt+5-8)",
+            "Audio (Alt+1-4, 0=Mute)  |  Max/Shrink (Alt+5-8)  |  Audio Stream (Alt+9)",
             panel_prefix="P2 ",
         )
 
@@ -2509,11 +2624,14 @@ class QuadViewerApp:
         self._update_quad_display(quad_name, None)
         self._save_assignments()
 
+    def _active_panel_quads(self):
+        """Return the quadrant dict for the currently visible panel tab."""
+        selected = self.notebook.index(self.notebook.select())
+        return PANEL2_QUADRANTS if selected == 1 else QUADRANTS
+
     def _clear_all_quadrants(self):
         """Clear all quadrant assignments on the currently visible panel tab."""
-        # Determine which panel tab is selected (index 0 = Panel 1, 1 = Panel 2)
-        selected = self.notebook.index(self.notebook.select())
-        quads = PANEL2_QUADRANTS if selected == 1 else QUADRANTS
+        quads = self._active_panel_quads()
         for quad_name in quads:
             self.assignments[quad_name] = None
             self._update_quad_display(quad_name, None)
@@ -2840,10 +2958,15 @@ class QuadViewerApp:
             self.root.geometry(f"{new_w}x{new_h}+{new_x}+{new_y}")
 
     def _bring_to_front(self):
-        """Bring all Chrome windows to the OS foreground."""
-        if not self.active_pids:
+        """Bring Chrome windows for the active panel to the OS foreground."""
+        panel_quads = self._active_panel_quads()
+        pids = [
+            self.active_pids[q] for q in panel_quads
+            if q in self.active_pids
+        ]
+        if not pids:
             return
-        for pid in self.active_pids.values():
+        for pid in pids:
             threading.Thread(
                 target=bring_os_window_to_front,
                 args=(pid,),
@@ -3004,7 +3127,12 @@ class QuadViewerApp:
             )
             return
 
-        active = {q: ch for q, ch in self.assignments.items() if ch is not None}
+        # Only launch quadrants for the currently active panel tab
+        panel_quads = self._active_panel_quads()
+        active = {
+            q: ch for q, ch in self.assignments.items()
+            if ch is not None and q in panel_quads
+        }
         if not active:
             messagebox.showwarning(
                 "Nothing to Launch", "Assign at least one channel to a quadrant."
@@ -3013,21 +3141,11 @@ class QuadViewerApp:
 
         work_x, work_y, work_w, work_h = get_work_area(self.hide_taskbar.get())
 
-        self._close_all()
-        self.active_ports.clear()
-        self.active_pids.clear()
-        self._quad_rects.clear()
-        self._quad_maximized.clear()
-        for btn in self.quad_max_btns.values():
-            btn.config(text="Max")
+        # Close only the quadrants on the active panel (leave the other panel running)
+        for quad_name in panel_quads:
+            self._close_quadrant(quad_name)
 
-        p1_active = {q: ch for q, ch in active.items() if not q.startswith("P2 ")}
-        p2_active = {q: ch for q, ch in active.items() if q.startswith("P2 ")}
-        rects = {}
-        if p1_active:
-            rects.update(get_smart_rects(p1_active, work_x, work_y, work_w, work_h))
-        if p2_active:
-            rects.update(get_smart_rects(p2_active, work_x, work_y, work_w, work_h))
+        rects = get_smart_rects(active, work_x, work_y, work_w, work_h)
 
         for quad_name, channel in active.items():
             url = _get_launch_url(channel)
@@ -3093,10 +3211,11 @@ class QuadViewerApp:
                 target=self._enforce_bounds_after_launch, daemon=True
             ).start()
 
-        # Set initial audio: mute all except Upper Left after videos load
-        if self.active_ports:
+        # Set initial audio: mute newly launched quadrants except the audio quad
+        launched = set(active.keys())
+        if launched:
             threading.Thread(
-                target=self._initial_mute, daemon=True
+                target=self._initial_mute_panel, args=(launched,), daemon=True
             ).start()
 
     def _enforce_bounds_after_launch(self):
@@ -3165,10 +3284,15 @@ class QuadViewerApp:
             user32.RegisterHotKey(None, i + 1, MOD_CTRL, VK_1 + i)
         user32.RegisterHotKey(None, 10, MOD_CTRL, VK_0)
 
-        # Panel 2: Alt+1..8 (IDs 11-18), Alt+0 (ID 20)
-        for i in range(8):
+        # Panel 2: Alt+1..8 (IDs 11-18), Alt+0 (ID 20), Alt+9 (ID 21)
+        for i in range(9):  # Alt+1 through Alt+9
             user32.RegisterHotKey(None, 11 + i, MOD_ALT, VK_1 + i)
         user32.RegisterHotKey(None, 20, MOD_ALT, VK_0)
+
+        # Ctrl+Alt+M = mute everything (ID 30)
+        MOD_CTRL_ALT = MOD_CTRL | MOD_ALT
+        VK_M = 0x4D
+        user32.RegisterHotKey(None, 30, MOD_CTRL_ALT, VK_M)
 
         # Blocking message loop — GetMessageW returns 0 on WM_QUIT
         msg = ctypes.wintypes.MSG()
@@ -3193,12 +3317,18 @@ class QuadViewerApp:
                 elif 15 <= hk_id <= 18:
                     quad = self._QUAD_ORDER_P2[hk_id - 15]
                     self.root.after(0, self._toggle_maximize, quad)
+                elif hk_id == 19:  # Alt+9: toggle audio stream mute
+                    self.root.after(0, self._audio_slot_toggle_mute)
                 elif hk_id == 20:
                     self.root.after(0, self._mute_all)
+                # Global: Ctrl+Alt+M = mute everything
+                elif hk_id == 30:
+                    self.root.after(0, self._mute_everything)
 
         # Cleanup
-        for i in range(20):
+        for i in range(21):
             user32.UnregisterHotKey(None, i + 1)
+        user32.UnregisterHotKey(None, 30)  # Ctrl+Alt+M
 
     def _initial_mute(self):
         """Wait for videos to load, then mute all except Upper Left."""
@@ -3209,6 +3339,28 @@ class QuadViewerApp:
             js = self._unmute_js_for(url) if q == "Upper Left" else self._mute_js_for(url)
             cdp_evaluate(port, js, retries=3, delay=1)
         self.audio_quad = "Upper Left"
+        self.root.after(0, self._update_audio_indicator)
+
+    def _initial_mute_panel(self, launched_quads):
+        """Wait for videos to load, then mute newly launched quadrants.
+
+        Only touches quadrants in *launched_quads* so the other panel's
+        audio state is not disturbed.  If the current audio_quad is among
+        the launched set it stays unmuted; otherwise all launched quads are
+        muted.
+        """
+        time.sleep(30)
+        for q in launched_quads:
+            port = self.active_ports.get(q)
+            if not port:
+                continue
+            ch = self.assignments.get(q)
+            url = ch.get("url", "") if ch else ""
+            if q == self.audio_quad:
+                js = self._unmute_js_for(url)
+            else:
+                js = self._mute_js_for(url)
+            cdp_evaluate(port, js, retries=3, delay=1)
         self.root.after(0, self._update_audio_indicator)
 
     def _set_audio_solo(self, quad_name):
@@ -3242,6 +3394,13 @@ class QuadViewerApp:
             ).start()
         self._update_audio_indicator()
 
+    def _mute_everything(self):
+        """Mute all quadrants AND the audio stream (Ctrl+Alt+M)."""
+        self._mute_all()
+        # Also mute the audio slot if it's running and not already muted
+        if self._audio_slot_port and not self._audio_slot_muted:
+            self._audio_slot_toggle_mute()
+
     def _do_audio_switch(self, port, js, is_spectrum):
         """Background: mute/unmute, then resume Spectrum if it paused."""
         cdp_evaluate(port, js, retries=3, delay=1)
@@ -3264,6 +3423,159 @@ class QuadViewerApp:
                 if logo:
                     self.quad_logos[quad_name].config(image=logo)
 
+    # ---- Audio-only stream slot -----------------------------------------------
+
+    def _audio_slot_launch(self):
+        """Launch a Chrome window for audio-only streaming."""
+        if self._audio_slot_proc and self._audio_slot_proc.poll() is None:
+            # Already running — bring it on-screen so user can navigate
+            self._audio_slot_show()
+            return
+        chrome = find_chrome()
+        if chrome is None:
+            messagebox.showerror(
+                "Chrome Not Found",
+                "Google Chrome was not found at the expected location.",
+            )
+            return
+        profile_dir = os.path.join(PROFILES_DIR, AUDIO_SLOT_PROFILE)
+        os.makedirs(profile_dir, exist_ok=True)
+
+        url = self._audio_slot_url_var.get().strip() or AUDIO_SLOT_DEFAULT_URL
+
+        # Save URL to history (most recent first, no duplicates)
+        if url in self._audio_slot_url_history:
+            self._audio_slot_url_history.remove(url)
+        self._audio_slot_url_history.insert(0, url)
+        self._audio_slot_url_history = self._audio_slot_url_history[:20]  # cap at 20
+        self._audio_slot_combo["values"] = self._audio_slot_url_history
+        settings = load_settings()
+        settings["audio_slot_urls"] = self._audio_slot_url_history
+        save_settings(settings)
+
+        # Launch on-screen initially so the user can log in / navigate
+        work_x, work_y, work_w, work_h = get_work_area(self.hide_taskbar.get())
+        w, h = work_w // 2, work_h // 2
+        x = work_x + (work_w - w) // 2
+        y = work_y + (work_h - h) // 2
+
+        cmd = [
+            chrome,
+            f"--app={url}",
+            f"--window-position={x},{y}",
+            f"--window-size={w},{h}",
+            f"--user-data-dir={profile_dir}",
+            f"--remote-debugging-port={AUDIO_SLOT_CDP_PORT}",
+            "--disable-infobars",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-features=MediaRouter",
+        ]
+        self._audio_slot_proc = subprocess.Popen(cmd)
+        self._audio_slot_port = AUDIO_SLOT_CDP_PORT
+        self._audio_slot_muted = False
+        self._audio_slot_update_btn_states()
+        self.root.after(500, self._raise_app)
+
+    def _audio_slot_hide(self):
+        """Move the audio-only Chrome window off-screen (audio keeps playing)."""
+        if not self._audio_slot_port:
+            return
+        try:
+            cdp_evaluate(
+                self._audio_slot_port,
+                "window.moveTo(-3000, 0);",
+                retries=2, delay=1,
+            )
+        except Exception:
+            pass
+        self._audio_slot_update_btn_states()
+
+    def _audio_slot_show(self):
+        """Bring the audio-only Chrome window back on-screen for navigation."""
+        if not self._audio_slot_port:
+            return
+        work_x, work_y, work_w, work_h = get_work_area(self.hide_taskbar.get())
+        w, h = work_w // 2, work_h // 2
+        cx = work_x + (work_w - w) // 2
+        cy = work_y + (work_h - h) // 2
+        try:
+            cdp_evaluate(
+                self._audio_slot_port,
+                f"window.moveTo({cx}, {cy}); window.resizeTo({w}, {h});",
+                retries=2, delay=1,
+            )
+        except Exception:
+            pass
+
+    def _audio_slot_toggle_mute(self):
+        """Toggle mute on the audio-only stream."""
+        if not self._audio_slot_port:
+            return
+        self._audio_slot_muted = not self._audio_slot_muted
+        js = MUTE_ALL_JS if self._audio_slot_muted else (
+            "document.querySelectorAll('video, audio').forEach(function(el){el.muted=false;});"
+        )
+        try:
+            cdp_evaluate(self._audio_slot_port, js, retries=2, delay=1)
+        except Exception:
+            pass
+        self._audio_slot_update_btn_states()
+
+    def _audio_slot_stop(self):
+        """Close the audio-only Chrome window."""
+        proc = self._audio_slot_proc
+        if proc and proc.poll() is None:
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(proc.pid)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                proc.wait(timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+        self._audio_slot_proc = None
+        self._audio_slot_port = None
+        self._audio_slot_muted = False
+        self._audio_slot_update_btn_states()
+
+    def _audio_slot_update_btn_states(self):
+        """Update the audio slot UI buttons based on current state."""
+        running = (
+            self._audio_slot_proc is not None
+            and self._audio_slot_proc.poll() is None
+        )
+        if hasattr(self, "_audio_slot_btns"):
+            self._audio_slot_btns["hide"].config(
+                state="normal" if running else "disabled"
+            )
+            self._audio_slot_btns["show"].config(
+                state="normal" if running else "disabled"
+            )
+            self._audio_slot_btns["mute"].config(
+                state="normal" if running else "disabled",
+                text="Unmute" if self._audio_slot_muted else "Mute",
+            )
+            self._audio_slot_btns["stop"].config(
+                state="normal" if running else "disabled"
+            )
+            self._audio_slot_btns["launch"].config(
+                text="Show" if running else "Launch"
+            )
+
+    def _close_panel(self):
+        """Close Chrome windows for the active panel tab only."""
+        panel_quads = self._active_panel_quads()
+        for quad_name in panel_quads:
+            self._close_quadrant(quad_name)
+        # Restore taskbar if no streams remain on either panel
+        if not self.active_ports and not self._closing and self.hide_taskbar.get():
+            _restore_taskbar()
+
     def _close_all(self):
         """Gracefully close Chrome windows so cookies/sessions are saved."""
         for proc in self.processes:
@@ -3285,6 +3597,9 @@ class QuadViewerApp:
         self.processes.clear()
         self.active_ports.clear()
         self.active_pids.clear()
+
+        # Also close the audio-only stream slot
+        self._audio_slot_stop()
 
         # Restore taskbar when all streams are closed (but not on app exit)
         if not self._closing and self.hide_taskbar.get():
@@ -3508,7 +3823,9 @@ class QuadViewerApp:
             "Ctrl+6   - Maximize / Shrink Upper Right\n"
             "Ctrl+7   - Maximize / Shrink Lower Left\n"
             "Ctrl+8   - Maximize / Shrink Lower Right\n"
-            "Ctrl+9   - Toggle between QuadViewer app and TV windows\n\n"
+            "Ctrl+9   - Toggle between QuadViewer app and TV windows\n"
+            "Alt+9    - Mute / Unmute audio stream\n"
+            "Ctrl+Alt+M - Mute everything (all quadrants + audio stream)\n\n"
             "PRESETS\n"
             "-------\n"
             "Save     - Save current quadrant assignments as a named preset.\n"
@@ -3588,7 +3905,7 @@ class QuadViewerApp:
 
         about_text = (
             "DevCon QuadViewer\n"
-            "Version 1.4\n\n"
+            "Version 2.0\n\n"
             "by DevCon Productions\n"
             "Cleveland, Ohio, USA\n\n"
             "Copyright \u00a9 2026 by DevCon Productions\n"
@@ -3759,9 +4076,28 @@ def main():
         hdpi=False,
     )
 
-    # Window / taskbar icon
+    # Window / taskbar icon — use iconphoto to override ttkbootstrap's
+    # default feather icon (iconbitmap alone doesn't replace it).
+    # Supply multiple sizes so Windows picks the best fit for each context
+    # (title bar 16px, taskbar 32px, Alt+Tab 48px, etc.).
     if os.path.isfile(ICO_PATH):
         root.iconbitmap(ICO_PATH)
+        try:
+            ico = Image.open(ICO_PATH)
+            _ico_photos = []
+            for size in (256, 64, 48, 32, 16):
+                img = ico.copy()
+                img.thumbnail((size, size), Image.LANCZOS)
+                # Ensure square canvas so Windows doesn't distort
+                if img.size[0] != img.size[1]:
+                    square = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+                    offset = ((size - img.size[0]) // 2, (size - img.size[1]) // 2)
+                    square.paste(img, offset)
+                    img = square
+                _ico_photos.append(ImageTk.PhotoImage(img))
+            root.iconphoto(True, *_ico_photos)
+        except Exception:
+            pass
 
     style = root.style
     style.configure("Hover.TLabelframe", background="#1a3a5c")

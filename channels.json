@@ -297,6 +297,7 @@
   {
     "name": "Live Cameras",
     "url": "https://www.youtube.com/watch?v=2BLqhS59Elc",
+    "youtube_search": "bostonandmainelive live cameras around the world",
     "logo": "bostonandmainelive.jpg",
     "categories": [
       "YouTube"
@@ -389,6 +390,7 @@
   {
     "name": "Cleveland Public Library",
     "url": "https://www.youtube.com/watch?v=ydWa5WSrJKs",
+    "youtube_search": "Cleveland Public Library live",
     "logo": "Cleveland.png",
     "categories": [
       "Cleveland",
@@ -398,6 +400,7 @@
   {
     "name": "Terminal Tower",
     "url": "https://www.youtube.com/watch?v=n5Ja0_q2Cos",
+    "youtube_search": "EarthCam Terminal Tower Cleveland live",
     "logo": "Cleveland.png",
     "categories": [
       "Cleveland",
@@ -407,6 +410,7 @@
   {
     "name": "NYC",
     "url": "https://www.youtube.com/watch?v=n5Ja0_q2Cos",
+    "youtube_search": "EarthCam New York City live",
     "logo": "NYC.jpg",
     "categories": [
       "Webcams"
@@ -424,6 +428,7 @@
   {
     "name": "NYC One Vanderbilt",
     "url": "https://www.youtube.com/watch?v=TsgoxkRFit0",
+    "youtube_search": "EarthCam SUMMIT One Vanderbilt live",
     "logo": "NYC.jpg",
     "categories": [
       "Webcams"
@@ -477,6 +482,7 @@
   {
     "name": "Venice V Hotel, Venice Beach",
     "url": "https://www.youtube.com/watch?v=EO_1LWqsCNE",
+    "youtube_search": "Venice V Hotel Venice Beach live cam",
     "logo": "VeniceBeach.jpg",
     "categories": [
       "Webcams"
@@ -485,6 +491,7 @@
   {
     "name": "Washington DC Axis Communications",
     "url": "https://www.youtube.com/watch?v=1wV9lLe14aU",
+    "youtube_search": "Washington DC Axis Communications live",
     "logo": "WashingtonDC.jpg",
     "categories": [
       "Webcams"
@@ -493,6 +500,7 @@
   {
     "name": "Midway Airport",
     "url": "https://www.youtube.com/watch?v=67BCsiW-1Io",
+    "youtube_search": "Midway Airport Chicago live",
     "logo": "Midway.png",
     "categories": [
       "Airports",
@@ -502,6 +510,7 @@
   {
     "name": "Philadelphia",
     "url": "https://www.youtube.com/watch?v=RH5fgOcO0jg",
+    "youtube_search": "EarthCam Philadelphia live",
     "logo": "Philadelphia.jpg",
     "categories": [
       "Webcams"
@@ -550,6 +559,7 @@
   {
     "name": "Amsterdam (Station Centraal)",
     "url": "https://www.youtube.com/watch?v=FHJH2yMe6Hw",
+    "youtube_search": "Amsterdam Station Centraal live",
     "logo": "Amsterdam.jpg",
     "categories": [
       "Webcams"
@@ -567,6 +577,7 @@
   {
     "name": "Tokyo",
     "url": "https://www.youtube.com/watch?v=bLME9s6gycw",
+    "youtube_search": "Tokyo Shibuya live camera",
     "logo": "Tokyo.jpg",
     "categories": [
       "Webcams"
@@ -575,6 +586,7 @@
   {
     "name": "Centrair Airport",
     "url": "https://www.youtube.com/watch?v=_KkyeoAXGj8",
+    "youtube_search": "Centrair Airport live",
     "logo": "Centrair.png",
     "categories": [
       "Airports",
@@ -776,6 +788,177 @@
     "logo": "Paramount.jpg",
     "categories": [
       "Fubo"
+    ]
+  },
+  {
+    "name": "DW News",
+    "url": "https://www.youtube.com/@dwnews/live",
+    "logo": "DWNews.jpg",
+    "categories": [
+      "News",
+      "YouTube"
+    ]
+  },
+  {
+    "name": "ABC News",
+    "url": "https://www.youtube.com/@ABCNews/live",
+    "logo": "abcnews.jpg",
+    "categories": [
+      "News",
+      "YouTube"
+    ]
+  },
+  {
+    "name": "NBC News NOW",
+    "url": "https://www.youtube.com/@NBCNews/live",
+    "logo": "NBCNews.jpg",
+    "categories": [
+      "News",
+      "YouTube"
+    ]
+  },
+  {
+    "name": "France 24",
+    "url": "https://www.youtube.com/@France24_en/live",
+    "logo": "France24.jpg",
+    "categories": [
+      "News",
+      "YouTube"
+    ]
+  },
+  {
+    "name": "Yahoo Finance 24/7",
+    "url": "https://www.youtube.com/@YahooFinance/live",
+    "logo": "YahooFinance.jpg",
+    "categories": [
+      "News",
+      "YouTube"
+    ]
+  },
+  {
+    "name": "Miekii",
+    "url": "https://www.twitch.tv/miekii",
+    "logo": "Miekii.png",
+    "categories": [
+      "Twitch"
+    ]
+  },
+  {
+    "name": "Nest",
+    "url": "https://www.twitch.tv/nest",
+    "logo": "nest.png",
+    "categories": [
+      "Twitch"
+    ]
+  },
+  {
+    "name": "Mellooow_",
+    "url": "https://www.twitch.tv/mellooow_",
+    "logo": "mellooow_.png",
+    "categories": [
+      "Twitch"
+    ]
+  },
+  {
+    "name": "Queen Celda",
+    "url": "https://www.twitch.tv/queen_celda",
+    "logo": "QueenCelda.jpeg",
+    "categories": [
+      "Twitch"
+    ]
+  },
+  {
+    "name": "Melina",
+    "url": "https://www.twitch.tv/melina",
+    "logo": "melina.png",
+    "categories": [
+      "Twitch"
+    ]
+  },
+  {
+    "name": "Woke",
+    "url": "https://www.twitch.tv/woke",
+    "logo": "woke.png",
+    "categories": [
+      "Twitch"
+    ]
+  },
+  {
+    "name": "Amouranth",
+    "url": "https://www.twitch.tv/amouranth",
+    "logo": "Amouranth.png",
+    "categories": [
+      "Twitch"
+    ]
+  },
+  {
+    "name": "Agenda Free TV",
+    "url": "https://www.twitch.tv/agendafreetv",
+    "logo": "AgendaFreeTV.png",
+    "categories": [
+      "Twitch"
+    ]
+  },
+  {
+    "name": "Hasan Abi",
+    "url": "https://www.twitch.tv/hasanabi",
+    "logo": "HasanAbi.jpeg",
+    "categories": [
+      "Twitch"
+    ]
+  },
+  {
+    "name": "Mira",
+    "url": "https://www.twitch.tv/mira",
+    "logo": "mira.png",
+    "categories": [
+      "Twitch"
+    ]
+  },
+  {
+    "name": "Don Lemon",
+    "url": "https://www.twitch.tv/donlemon",
+    "logo": "DonLemon.png",
+    "categories": []
+  },
+  {
+    "name": "The Stock Guy",
+    "url": "https://www.twitch.tv/thestockguy",
+    "logo": "TheStockGuy.png",
+    "categories": [
+      "Twitch"
+    ]
+  },
+  {
+    "name": "Struggle 4",
+    "url": "https://www.twitch.tv/struggle_4",
+    "logo": "Struggle4.png",
+    "categories": [
+      "Twitch"
+    ]
+  },
+  {
+    "name": "Th3 Discourse",
+    "url": "https://www.twitch.tv/th3discourse",
+    "logo": "Th3Discourse.png",
+    "categories": [
+      "Twitch"
+    ]
+  },
+  {
+    "name": "Cook Sux",
+    "url": "https://www.twitch.tv/cooksux",
+    "logo": "CookSux.png",
+    "categories": [
+      "Twitch"
+    ]
+  },
+  {
+    "name": "Alinity TV 247",
+    "url": "https://www.twitch.tv/alinitytv247",
+    "logo": "alinitytv247.png",
+    "categories": [
+      "Twitch"
     ]
   }
 ]
