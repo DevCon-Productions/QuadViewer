@@ -3416,8 +3416,8 @@ class QuadViewerApp:
                 elif 15 <= hk_id <= 18:
                     quad = self._QUAD_ORDER_P2[hk_id - 15]
                     self.root.after(0, self._toggle_maximize, quad)
-                elif hk_id == 19:  # Alt+9: toggle audio stream mute
-                    self.root.after(0, self._audio_slot_toggle_mute)
+                elif hk_id == 19:  # Alt+9: solo audio stream
+                    self.root.after(0, self._audio_slot_solo)
                 elif hk_id == 20:
                     self.root.after(0, self._mute_all)
                 # Global: Ctrl+Alt+M = mute everything
@@ -3463,7 +3463,7 @@ class QuadViewerApp:
         self.root.after(0, self._update_audio_indicator)
 
     def _set_audio_solo(self, quad_name):
-        """Unmute the given quadrant, mute all others."""
+        """Unmute the given quadrant, mute all others (including audio stream)."""
         if quad_name not in self.active_ports:
             return
         self.audio_quad = quad_name
@@ -3477,12 +3477,19 @@ class QuadViewerApp:
                 args=(port, js, is_spectrum),
                 daemon=True,
             ).start()
+        # Mute the audio stream when switching to a quadrant
+        if self._audio_slot_port and not self._audio_slot_muted:
+            self._audio_slot_muted = True
+            threading.Thread(
+                target=cdp_evaluate,
+                args=(self._audio_slot_port, MUTE_ALL_JS, 2, 1),
+                daemon=True,
+            ).start()
+            self._audio_slot_update_btn_states()
         self._update_audio_indicator()
 
     def _mute_all(self):
-        """Mute all quadrants."""
-        if not self.active_ports:
-            return
+        """Mute all quadrants and the audio stream."""
         self.audio_quad = None
         for q, port in self.active_ports.items():
             ch = self.assignments.get(q)
@@ -3491,14 +3498,19 @@ class QuadViewerApp:
             threading.Thread(
                 target=cdp_evaluate, args=(port, js, 3, 1), daemon=True
             ).start()
+        # Also mute the audio stream
+        if self._audio_slot_port and not self._audio_slot_muted:
+            self._audio_slot_muted = True
+            threading.Thread(
+                target=cdp_evaluate,
+                args=(self._audio_slot_port, MUTE_ALL_JS, 2, 1),
+                daemon=True,
+            ).start()
+            self._audio_slot_update_btn_states()
         self._update_audio_indicator()
 
-    def _mute_everything(self):
-        """Mute all quadrants AND the audio stream (Ctrl+Alt+M)."""
-        self._mute_all()
-        # Also mute the audio slot if it's running and not already muted
-        if self._audio_slot_port and not self._audio_slot_muted:
-            self._audio_slot_toggle_mute()
+    # Ctrl+Alt+M — same as _mute_all now that it includes the audio stream
+    _mute_everything = _mute_all
 
     def _do_audio_switch(self, port, js, is_spectrum):
         """Background: mute/unmute, then resume Spectrum if it paused."""
@@ -3620,6 +3632,33 @@ class QuadViewerApp:
         except Exception:
             pass
         self._audio_slot_update_btn_states()
+
+    def _audio_slot_solo(self):
+        """Switch audio to the audio stream: unmute it, mute all quadrants."""
+        if not self._audio_slot_port:
+            return
+        # Mute all quadrants
+        self.audio_quad = None
+        for q, port in self.active_ports.items():
+            ch = self.assignments.get(q)
+            url = ch.get("url", "") if ch else ""
+            js = self._mute_js_for(url)
+            threading.Thread(
+                target=cdp_evaluate, args=(port, js, 3, 1), daemon=True
+            ).start()
+        # Unmute the audio stream
+        if self._audio_slot_muted:
+            self._audio_slot_muted = False
+            try:
+                cdp_evaluate(
+                    self._audio_slot_port,
+                    "document.querySelectorAll('video, audio').forEach(function(el){el.muted=false;});",
+                    retries=2, delay=1,
+                )
+            except Exception:
+                pass
+        self._audio_slot_update_btn_states()
+        self._update_audio_indicator()
 
     def _audio_slot_stop(self):
         """Close the audio-only Chrome window."""
