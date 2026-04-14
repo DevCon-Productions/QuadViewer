@@ -25,7 +25,7 @@ from tkinter import ttk, messagebox, filedialog, simpledialog
 import urllib.request
 import urllib.error
 
-from PIL import Image, ImageTk
+from PIL import Image, ImageDraw, ImageTk
 import ttkbootstrap as tbs
 from ttkbootstrap.constants import *
 
@@ -1836,6 +1836,9 @@ class QuadViewerApp:
         # Ensure the window doesn't extend behind the taskbar
         self.root.after(200, self._fit_to_work_area)
 
+        # Start Twitch live indicator refresh (first update after fetch completes)
+        self.root.after(10_000, self._schedule_twitch_indicator_refresh)
+
         # Global hotkeys (Ctrl+1..4) — work even when QuadViewer isn't focused
         self._hotkey_thread = threading.Thread(
             target=self._hotkey_loop, daemon=True
@@ -1904,6 +1907,75 @@ class QuadViewerApp:
         """Remove a logo from caches so it gets reloaded next time."""
         self._logo_small.pop(logo_filename, None)
         self._logo_large.pop(logo_filename, None)
+
+    def _make_status_dot(self, color, size=8):
+        """Create a small filled circle image for status indicators."""
+        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        draw.ellipse([0, 0, size - 1, size - 1], fill=color)
+        return img
+
+    def _get_logo_with_status(self, logo_filename, is_live):
+        """Return a logo image with a live/offline status dot in the corner."""
+        cache_key = f"{logo_filename}:{'live' if is_live else 'off'}"
+        if cache_key in self._logo_small:
+            return self._logo_small[cache_key]
+        # Get the base logo
+        base = self._get_logo(logo_filename, LOGO_SMALL)
+        if not base:
+            return None
+        try:
+            # Convert PhotoImage back to PIL for compositing
+            base_img = Image.new("RGBA", (LOGO_SMALL, LOGO_SMALL), (0, 0, 0, 0))
+            path = os.path.join(LOGOS_DIR, logo_filename)
+            if os.path.isfile(path):
+                base_img = Image.open(path).convert("RGBA")
+                base_img.thumbnail((LOGO_SMALL, LOGO_SMALL), Image.LANCZOS)
+            dot_color = (0, 200, 0, 255) if is_live else (200, 0, 0, 230)
+            dot = self._make_status_dot(dot_color, size=10)
+            # Place dot in bottom-right corner
+            dx = base_img.width - dot.width
+            dy = base_img.height - dot.height
+            base_img.paste(dot, (dx, dy), dot)
+            photo = ImageTk.PhotoImage(base_img)
+            self._logo_small[cache_key] = photo
+            return photo
+        except Exception:
+            return base
+
+    def _update_twitch_indicators(self):
+        """Update channel tree icons to show Twitch live/offline status dots."""
+        if not _twitch_cache["data"]:
+            return
+        # If hiding offline channels, repopulate the tree so items appear/disappear
+        if self._hide_offline_twitch.get():
+            self._populate_tree()
+        # Apply status dot overlays to visible Twitch channel logos
+        for iid, ch in list(self._tree_item_map.items()):
+            url = ch.get("url", "")
+            uname = _twitch_username(url)
+            if not uname:
+                continue
+            info = _twitch_cache["data"].get(uname)
+            if info is None:
+                continue
+            logo_file = ch.get("logo", "")
+            if not logo_file:
+                continue
+            logo = self._get_logo_with_status(logo_file, info.get("is_live", False))
+            if logo:
+                try:
+                    self.channel_tree.item(iid, image=logo)
+                except Exception:
+                    pass
+
+    def _schedule_twitch_indicator_refresh(self):
+        """Periodically refresh Twitch status indicators in the channel list."""
+        if self._closing:
+            return
+        self._update_twitch_indicators()
+        # Refresh every 2 minutes (matches Twitch cache TTL of 120s)
+        self.root.after(120_000, self._schedule_twitch_indicator_refresh)
 
     # ---- GUI construction --------------------------------------------------
 
@@ -2069,6 +2141,15 @@ class QuadViewerApp:
             self._cat_btn_frame, text="Expand All",
             command=self._expand_all_categories
         ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
+
+        # Hide offline Twitch channels toggle
+        self._hide_offline_twitch = tk.BooleanVar(value=False)
+        self._hide_offline_cb = ttk.Checkbutton(
+            left_frame, text="Hide offline Twitch channels",
+            variable=self._hide_offline_twitch,
+            command=self._populate_tree,
+        )
+        self._hide_offline_cb.pack(fill=tk.X, pady=(4, 0))
 
         # Channel management buttons
         self._mgmt_frame = ttk.Frame(left_frame)
@@ -2238,12 +2319,25 @@ class QuadViewerApp:
         # the notebook with side=BOTTOM so they always stay visible.)
 
     def _populate_tree(self):
+        # Remember which categories are expanded before clearing
+        expanded = set()
+        if self._show_categories.get():
+            for item in self.channel_tree.get_children():
+                if "category" in self.channel_tree.item(item, "tags"):
+                    if self.channel_tree.item(item, "open"):
+                        expanded.add(self.channel_tree.item(item, "text"))
+
         for item in self.channel_tree.get_children():
             self.channel_tree.delete(item)
         self._tree_item_map.clear()
 
         if self._show_categories.get():
             self._populate_tree_categorized()
+            # Restore expanded categories
+            for item in self.channel_tree.get_children():
+                if "category" in self.channel_tree.item(item, "tags"):
+                    if self.channel_tree.item(item, "text") in expanded:
+                        self.channel_tree.item(item, open=True)
             # Show collapse/expand buttons (position before management buttons)
             if self._cat_btn_frame not in self._cat_btn_frame.master.pack_slaves():
                 self._cat_btn_frame.pack(fill=tk.X, pady=(4, 0),
@@ -2253,15 +2347,36 @@ class QuadViewerApp:
             # Hide collapse/expand buttons
             self._cat_btn_frame.pack_forget()
 
+    def _is_channel_hidden(self, ch):
+        """Return True if the channel should be hidden from the tree."""
+        if not self._hide_offline_twitch.get():
+            return False
+        url = ch.get("url", "")
+        uname = _twitch_username(url)
+        if not uname:
+            return False
+        # Only hide if we have status data (don't hide before first fetch)
+        info = _twitch_cache["data"].get(uname)
+        if info is None:
+            return False
+        return not info.get("is_live", False)
+
+    def _insert_channel(self, parent, ch):
+        """Insert a channel into the tree, returning the item ID."""
+        logo = self._get_logo(ch.get("logo", ""), LOGO_SMALL)
+        if logo:
+            iid = self.channel_tree.insert(parent, tk.END, values=(ch["name"],), image=logo)
+        else:
+            iid = self.channel_tree.insert(parent, tk.END, values=(ch["name"],))
+        self._tree_item_map[iid] = ch
+        return iid
+
     def _populate_tree_flat(self):
         """Populate channel list as a flat list (no categories)."""
         for ch in self.channels:
-            logo = self._get_logo(ch.get("logo", ""), LOGO_SMALL)
-            if logo:
-                iid = self.channel_tree.insert("", tk.END, values=(ch["name"],), image=logo)
-            else:
-                iid = self.channel_tree.insert("", tk.END, values=(ch["name"],))
-            self._tree_item_map[iid] = ch
+            if self._is_channel_hidden(ch):
+                continue
+            self._insert_channel("", ch)
 
     def _populate_tree_categorized(self):
         """Populate channel list grouped by category with parent headers."""
@@ -2269,6 +2384,8 @@ class QuadViewerApp:
         cat_channels = {}
         uncategorized = []
         for ch in self.channels:
+            if self._is_channel_hidden(ch):
+                continue
             cats = ch.get("categories", [])
             if not cats:
                 uncategorized.append(ch)
@@ -2283,16 +2400,7 @@ class QuadViewerApp:
                 open=False, tags=("category",)
             )
             for ch in cat_channels[cat_name]:
-                logo = self._get_logo(ch.get("logo", ""), LOGO_SMALL)
-                if logo:
-                    iid = self.channel_tree.insert(
-                        parent, tk.END, values=(ch["name"],), image=logo
-                    )
-                else:
-                    iid = self.channel_tree.insert(
-                        parent, tk.END, values=(ch["name"],)
-                    )
-                self._tree_item_map[iid] = ch
+                self._insert_channel(parent, ch)
 
         # Uncategorized channels under "Other"
         if uncategorized:
@@ -2301,16 +2409,7 @@ class QuadViewerApp:
                 open=False, tags=("category",)
             )
             for ch in uncategorized:
-                logo = self._get_logo(ch.get("logo", ""), LOGO_SMALL)
-                if logo:
-                    iid = self.channel_tree.insert(
-                        parent, tk.END, values=(ch["name"],), image=logo
-                    )
-                else:
-                    iid = self.channel_tree.insert(
-                        parent, tk.END, values=(ch["name"],)
-                    )
-                self._tree_item_map[iid] = ch
+                self._insert_channel(parent, ch)
 
     def _collapse_all_categories(self):
         """Collapse all category headers in the tree."""
@@ -4071,8 +4170,8 @@ def main():
     root = tbs.Window(
         title="DevCon QuadViewer",
         themename=theme,
-        size=(1180, 700),
-        minsize=(1180, 700),
+        size=(1180, 820),
+        minsize=(1180, 820),
         hdpi=False,
     )
 
