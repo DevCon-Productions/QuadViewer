@@ -1455,10 +1455,11 @@ def _fetch_youtube_live_urls(channels):
         for ch in channels:
             handle = ch.get("youtube_handle", "")
             search = ch.get("youtube_search", "")
-            if handle and handle not in data:
-                data[handle] = _resolve_youtube_live(handle)
-            elif search and search not in data:
+            # Search takes precedence — specific query beats "first live on channel"
+            if search and search not in data:
                 data[search] = _resolve_youtube_search(search)
+            elif handle and handle not in data:
+                data[handle] = _resolve_youtube_live(handle)
             elif not handle and not search:
                 # Auto-derive search for YouTube URLs with no explicit config
                 auto_key = _youtube_cache_key(ch)
@@ -1488,7 +1489,10 @@ def _youtube_cache_key(channel):
     auto-generates a search key from the channel name so that newly-added
     YouTube webcams resolve dynamically without manual configuration.
     """
-    key = channel.get("youtube_handle", "") or channel.get("youtube_search", "")
+    # Search takes precedence over handle — if user specified a search term,
+    # they want that specific stream (important for channels like @fox5ny
+    # that run multiple simultaneous live streams).
+    key = channel.get("youtube_search", "") or channel.get("youtube_handle", "")
     if key:
         return key
     # Auto-derive search from channel name if the URL is a YouTube link
