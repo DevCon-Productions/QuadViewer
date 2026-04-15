@@ -214,12 +214,13 @@
   },
   {
     "name": "Sky News",
-    "url": "https://www.youtube.com/watch?v=YDvsBbKfLPA",
+    "url": "https://www.youtube.com/@SkyNews/live",
     "logo": "skynews.png",
-    "youtube_handle": "@SkyNews",
     "categories": [
       "YouTube"
-    ]
+    ],
+    "youtube_handle": "@SkyNews",
+    "youtube_search": "Sky News"
   },
   {
     "name": "Prime Video",
@@ -256,13 +257,14 @@
   },
   {
     "name": "Al Jazeera",
-    "url": "https://www.youtube.com/watch?v=gCNeDWCI0vo",
+    "url": "https://www.youtube.com/@aljazeeraenglish/live",
     "logo": "aljazeera.png",
-    "youtube_handle": "@AlJazeeraEnglish",
     "categories": [
       "News",
       "YouTube"
-    ]
+    ],
+    "youtube_handle": "@AlJazeeraEnglish",
+    "youtube_search": "Al Jazeera English"
   },
   {
     "name": "LiveNOW from FOX",
@@ -278,21 +280,23 @@
     "name": "NHK World-Japan",
     "url": "https://www.youtube.com/watch?v=f0lYkdA-Gtw",
     "logo": "nhkworld.png",
-    "youtube_handle": "@NHKWORLDJAPAN",
     "categories": [
       "News",
       "YouTube"
-    ]
+    ],
+    "youtube_handle": "@NHKWORLDJAPAN",
+    "youtube_search": "LIVE: NHK WORLD-JAPAN News"
   },
   {
     "name": "NASA Int Space Station",
-    "url": "https://www.youtube.com/watch?v=aB1yRz0HhdY",
+    "url": "https://www.youtube.com/@NASA/live",
     "logo": "nasa.png",
-    "youtube_handle": "@NASA",
     "categories": [
       "News",
       "YouTube"
-    ]
+    ],
+    "youtube_handle": "@NASA",
+    "youtube_search": "Live Video from the International Space Station (Official NASA Stream)"
   },
   {
     "name": "Live Cameras",
@@ -361,15 +365,6 @@
     ]
   },
   {
-    "name": "Downtown Akron",
-    "url": "https://g1.ipcamlive.com/player/player.php?alias=63ed3a28704fc&autoplay=1&mute=1",
-    "logo": "Cleveland.png",
-    "categories": [
-      "Cleveland",
-      "Webcams"
-    ]
-  },
-  {
     "name": "Midtown Cleveland",
     "url": "https://g1.ipcamlive.com/player/player.php?alias=63ed37f2439ce&autoplay=1&mute=1",
     "logo": "Cleveland.png",
@@ -390,217 +385,240 @@
   {
     "name": "Cleveland Public Library",
     "url": "https://www.youtube.com/watch?v=ydWa5WSrJKs",
-    "youtube_search": "Cleveland Public Library live",
     "logo": "Cleveland.png",
     "categories": [
       "Cleveland",
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@clevnet",
+    "youtube_search": "Cleveland Public Library Weather Camera"
   },
   {
     "name": "Terminal Tower",
     "url": "https://www.youtube.com/watch?v=n5Ja0_q2Cos",
-    "youtube_search": "EarthCam Terminal Tower Cleveland live",
     "logo": "Cleveland.png",
     "categories": [
       "Cleveland",
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@earthcam",
+    "youtube_search": "EarthCam Live: Terminal Tower Cam (Cleveland, OH)"
   },
   {
     "name": "NYC",
     "url": "https://www.youtube.com/watch?v=n5Ja0_q2Cos",
-    "youtube_search": "EarthCam New York City live",
     "logo": "NYC.jpg",
     "categories": [
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@fox5ny",
+    "youtube_search": "24/7 NYC Live Cam | Times Square, skyline, streets, more"
   },
   {
     "name": "Times Square",
     "url": "https://www.youtube.com/watch?v=rnXIjl_Rzy4",
     "logo": "NYC.jpg",
-    "youtube_search": "EarthCam Times Square live",
     "categories": [
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@EarthCam",
+    "youtube_search": "EarthCam Live: Times Square in 4K"
   },
   {
     "name": "NYC One Vanderbilt",
     "url": "https://www.youtube.com/watch?v=TsgoxkRFit0",
-    "youtube_search": "EarthCam SUMMIT One Vanderbilt live",
     "logo": "NYC.jpg",
     "categories": [
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@EarthCam",
+    "youtube_search": "EarthCam Live: SUMMIT One Vanderbilt (New York City, NY)"
   },
   {
     "name": "Brooklyn Bridge",
     "url": "https://www.youtube.com/watch?v=pEuK-UAtT3s",
     "logo": "NYC.jpg",
-    "youtube_search": "EarthCam Brooklyn Bridge live",
     "categories": [
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@StGeorgeTower",
+    "youtube_search": "Live NYC Brooklyn Bridge & Manhattan cam"
   },
   {
     "name": "Coney Island",
     "url": "https://www.youtube.com/watch?v=xHLEKR3_8iI",
     "logo": "NYC.jpg",
-    "youtube_search": "EarthCam Coney Island live",
     "categories": [
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@EarthCam",
+    "youtube_search": "EarthCam Live: Coney Island (New York City)"
   },
   {
     "name": "Chicago Skydeck",
     "url": "https://www.youtube.com/watch?v=sQxL8t0gtu8",
     "logo": "Chicago.jpg",
-    "youtube_search": "EarthCam Chicago Skydeck live",
     "categories": [
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@EarthCam",
+    "youtube_search": "EarthCam Live: Chicago Skydeck Cam (Chicago, IL)"
   },
   {
     "name": "Dublin, Ireland",
     "url": "https://www.youtube.com/watch?v=u4UZ4UvZXrg",
     "logo": "Dublin.jpg",
-    "youtube_search": "EarthCam Dublin Ireland live",
     "categories": [
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@EarthCam",
+    "youtube_search": "EarthCam Live: Dublin, Ireland"
   },
   {
     "name": "Western Wall Jerusalem",
     "url": "https://www.youtube.com/watch?v=0jEa0FOw6vE",
     "logo": "Jerusalem.png",
-    "youtube_search": "Western Wall Jerusalem live",
     "categories": [
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@EarthCam",
+    "youtube_search": "EarthCam Live - Western Wall (Jerusalem, Israel)"
   },
   {
     "name": "Venice V Hotel, Venice Beach",
-    "url": "https://www.youtube.com/watch?v=EO_1LWqsCNE",
-    "youtube_search": "Venice V Hotel Venice Beach live cam",
+    "url": "https://www.youtube.com/@Teleport.camera/live",
     "logo": "VeniceBeach.jpg",
     "categories": [
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@Teleport.camera",
+    "youtube_search": "Los Angeles Live Cam Venice Beach Venice V Hotel Live Camera Stream"
   },
   {
     "name": "Washington DC Axis Communications",
     "url": "https://www.youtube.com/watch?v=1wV9lLe14aU",
-    "youtube_search": "Washington DC Axis Communications live",
     "logo": "WashingtonDC.jpg",
     "categories": [
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@CamStreamer",
+    "youtube_search": "Washington DC Live from Axis Communications Experience Center"
   },
   {
     "name": "Midway Airport",
     "url": "https://www.youtube.com/watch?v=67BCsiW-1Io",
-    "youtube_search": "Midway Airport Chicago live",
     "logo": "Midway.png",
     "categories": [
       "Airports",
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@streamtimelive",
+    "youtube_search": "Midway Airport | Chicago, IL USA | StreamTime LIVE 4K"
   },
   {
     "name": "Philadelphia",
     "url": "https://www.youtube.com/watch?v=RH5fgOcO0jg",
-    "youtube_search": "EarthCam Philadelphia live",
     "logo": "Philadelphia.jpg",
     "categories": [
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@EarthCam",
+    "youtube_search": "EarthCam Live: Philadelphia, PA"
   },
   {
     "name": "Toronto Pearson Intl Airport",
     "url": "https://www.youtube.com/watch?v=8VnN1JGbjrA",
     "logo": "TorontoPearson.jpg",
-    "youtube_search": "Toronto Pearson Airport live",
     "categories": [
       "Airports",
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@waketurbulence747",
+    "youtube_search": "LIVE Toronto Pearson Airport Plane Spotting"
   },
   {
     "name": "LAX Runways 25L and 25R",
     "url": "https://www.youtube.com/watch?v=UQaSS4_VAV4",
     "logo": "LAX.jpg",
-    "youtube_search": "LAX runway 25 live",
     "categories": [
       "Airports",
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@airlinevideosliveplus",
+    "youtube_search": "LIVE 24/7 LAX Airport Action Runways 25L & 25R"
   },
   {
     "name": "LAX Runways 24L and 24R",
     "url": "https://www.youtube.com/watch?v=VjqKog3XwZ8",
     "logo": "LAX.jpg",
-    "youtube_search": "LAX runway 24 live",
     "categories": [
       "Airports",
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@airlinevideosliveplus",
+    "youtube_search": "LIVE 24/7 LAX Airport Action Runways 24L & 24R"
   },
   {
     "name": "LAS Runways 26R and 26L",
     "url": "https://www.youtube.com/watch?v=cn8_34TuMaM",
     "logo": "LAS.jpg",
-    "youtube_search": "Las Vegas airport runway live",
     "categories": [
       "Airports",
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@flightradar24",
+    "youtube_search": "LAS Vegas Airport LIVE 24/7 with views of 26R & 26L"
   },
   {
     "name": "Amsterdam (Station Centraal)",
     "url": "https://www.youtube.com/watch?v=FHJH2yMe6Hw",
-    "youtube_search": "Amsterdam Station Centraal live",
     "logo": "Amsterdam.jpg",
     "categories": [
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@ProRail",
+    "youtube_search": "Station Amsterdam Centraal - De Vijf Bruggen, camera 2 | Livestream ProRail"
   },
   {
     "name": "Sydney (Harbour)",
     "url": "https://www.youtube.com/watch?v=5uZa3-RMFos",
     "logo": "Sydney.jpg",
-    "youtube_search": "Sydney Harbour live cam",
     "categories": [
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@WebcamSydney",
+    "youtube_search": "WebcamSydney 1 Live Stream of Harbour 24/7 (~4K)"
   },
   {
     "name": "Tokyo",
-    "url": "https://www.youtube.com/watch?v=bLME9s6gycw",
-    "youtube_search": "Tokyo Shibuya live camera",
+    "url": "https://www.youtube.com/@tokyonowlive/live",
     "logo": "Tokyo.jpg",
     "categories": [
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@tokyonowlive",
+    "youtube_search": "Tokyo Now! LIVE - 東京, Cams, Trains, Traffic, Weather, Earthquakes"
   },
   {
     "name": "Centrair Airport",
     "url": "https://www.youtube.com/watch?v=_KkyeoAXGj8",
-    "youtube_search": "Centrair Airport live",
     "logo": "Centrair.png",
     "categories": [
       "Airports",
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@loveflightjack",
+    "youtube_search": "LIVE at Centrair Airport Plane Spotting　2026.02.26 セントレア空港ライブカメラ セントレア空港　NGO/RJGG"
   },
   {
     "name": "Paris (Seine & Notre Dame)",
-    "url": "https://www.youtube.com/watch?v=4GCTq0j2O0U",
+    "url": "https://www.youtube.com/@Sondelaterre/live",
     "logo": "Paris.jpg",
-    "youtube_search": "Paris Seine Notre Dame live cam",
     "categories": [
       "Webcams"
-    ]
+    ],
+    "youtube_handle": "@Sondelaterre",
+    "youtube_search": "🔴 Live Webcam Paris - La Seine et Notre Dame Ambiance en direct du bateau \"Le Son de la Terre\""
   },
   {
     "name": "HBO Max",
@@ -797,7 +815,9 @@
     "categories": [
       "News",
       "YouTube"
-    ]
+    ],
+    "youtube_handle": "@dwnews",
+    "youtube_search": "DW News livestream"
   },
   {
     "name": "ABC News",
@@ -806,7 +826,9 @@
     "categories": [
       "News",
       "YouTube"
-    ]
+    ],
+    "youtube_handle": "@ABCNews",
+    "youtube_search": "LIVE: ABC News Live"
   },
   {
     "name": "NBC News NOW",
@@ -815,7 +837,9 @@
     "categories": [
       "News",
       "YouTube"
-    ]
+    ],
+    "youtube_handle": "@NBCNews",
+    "youtube_search": "LIVE: NBC News NOW"
   },
   {
     "name": "France 24",
@@ -824,7 +848,9 @@
     "categories": [
       "News",
       "YouTube"
-    ]
+    ],
+    "youtube_handle": "@France24_en",
+    "youtube_search": "FRANCE 24 English – LIVE – International Breaking News & Top stories - 24/7 stream • FRANCE 24"
   },
   {
     "name": "Yahoo Finance 24/7",
@@ -833,7 +859,9 @@
     "categories": [
       "News",
       "YouTube"
-    ]
+    ],
+    "youtube_handle": "@YahooFinance",
+    "youtube_search": "Yahoo Finance 24/7 Stream: Daily Market Coverage & more"
   },
   {
     "name": "Miekii",
@@ -919,7 +947,9 @@
     "name": "Don Lemon",
     "url": "https://www.twitch.tv/donlemon",
     "logo": "DonLemon.png",
-    "categories": []
+    "categories": [
+      "Twitch"
+    ]
   },
   {
     "name": "The Stock Guy",
@@ -960,5 +990,16 @@
     "categories": [
       "Twitch"
     ]
+  },
+  {
+    "name": "Narita International Airport",
+    "url": "https://www.youtube.com/watch?v=-yd-3TCyBYE",
+    "logo": "Narita.jpeg",
+    "categories": [
+      "Airports",
+      "Webcams"
+    ],
+    "youtube_handle": "@loveflightjack",
+    "youtube_search": "LIVE at NARITA International Airport Plane Spotting　2026.04.15 成田空港ライブカメラ 成田空港　NRT/RJAA"
   }
 ]

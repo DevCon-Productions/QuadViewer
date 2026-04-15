@@ -1012,6 +1012,22 @@ INJECTED_JS = r"""
 """.replace("__PROFILE__", PROFILE_NAME)
 
 MUTE_ALL_JS = "document.querySelectorAll('video, audio').forEach(function(el){el.muted=true;});"
+
+# Comprehensive mute that also tries same-origin iframes (e.g. MLB embeds)
+AUDIO_SLOT_MUTE_JS = (
+    "(function(){"
+    "function muteDoc(d){try{d.querySelectorAll('video, audio').forEach(function(el){el.muted=true;el.volume=0;});}catch(e){}}"
+    "muteDoc(document);"
+    "document.querySelectorAll('iframe').forEach(function(f){try{if(f.contentDocument)muteDoc(f.contentDocument);}catch(e){}});"
+    "})();"
+)
+AUDIO_SLOT_UNMUTE_JS = (
+    "(function(){"
+    "function unmuteDoc(d){try{d.querySelectorAll('video, audio').forEach(function(el){el.muted=false;el.volume=1;});}catch(e){}}"
+    "unmuteDoc(document);"
+    "document.querySelectorAll('iframe').forEach(function(f){try{if(f.contentDocument)unmuteDoc(f.contentDocument);}catch(e){}});"
+    "})();"
+)
 RESUME_VIDEO_JS = "document.querySelectorAll('video').forEach(function(v){if(v.paused)try{v.play()}catch(e){}});"
 
 # YouTube's internal player overrides the HTML5 .muted property, so we must
@@ -3478,11 +3494,13 @@ class QuadViewerApp:
                 daemon=True,
             ).start()
         # Mute the audio stream when switching to a quadrant
-        if self._audio_slot_port and not self._audio_slot_muted:
+        # Always send the mute command (idempotent) — state may be out of sync
+        # with Chrome if the page navigated/reloaded.
+        if self._audio_slot_port:
             self._audio_slot_muted = True
             threading.Thread(
                 target=cdp_evaluate,
-                args=(self._audio_slot_port, MUTE_ALL_JS, 2, 1),
+                args=(self._audio_slot_port, AUDIO_SLOT_MUTE_JS, 3, 1),
                 daemon=True,
             ).start()
             self._audio_slot_update_btn_states()
@@ -3498,12 +3516,12 @@ class QuadViewerApp:
             threading.Thread(
                 target=cdp_evaluate, args=(port, js, 3, 1), daemon=True
             ).start()
-        # Also mute the audio stream
-        if self._audio_slot_port and not self._audio_slot_muted:
+        # Also mute the audio stream — always send (idempotent)
+        if self._audio_slot_port:
             self._audio_slot_muted = True
             threading.Thread(
                 target=cdp_evaluate,
-                args=(self._audio_slot_port, MUTE_ALL_JS, 2, 1),
+                args=(self._audio_slot_port, AUDIO_SLOT_MUTE_JS, 3, 1),
                 daemon=True,
             ).start()
             self._audio_slot_update_btn_states()
@@ -3624,13 +3642,12 @@ class QuadViewerApp:
         if not self._audio_slot_port:
             return
         self._audio_slot_muted = not self._audio_slot_muted
-        js = MUTE_ALL_JS if self._audio_slot_muted else (
-            "document.querySelectorAll('video, audio').forEach(function(el){el.muted=false;});"
-        )
-        try:
-            cdp_evaluate(self._audio_slot_port, js, retries=2, delay=1)
-        except Exception:
-            pass
+        js = AUDIO_SLOT_MUTE_JS if self._audio_slot_muted else AUDIO_SLOT_UNMUTE_JS
+        threading.Thread(
+            target=cdp_evaluate,
+            args=(self._audio_slot_port, js, 3, 1),
+            daemon=True,
+        ).start()
         self._audio_slot_update_btn_states()
 
     def _audio_slot_solo(self):
@@ -3646,17 +3663,13 @@ class QuadViewerApp:
             threading.Thread(
                 target=cdp_evaluate, args=(port, js, 3, 1), daemon=True
             ).start()
-        # Unmute the audio stream
-        if self._audio_slot_muted:
-            self._audio_slot_muted = False
-            try:
-                cdp_evaluate(
-                    self._audio_slot_port,
-                    "document.querySelectorAll('video, audio').forEach(function(el){el.muted=false;});",
-                    retries=2, delay=1,
-                )
-            except Exception:
-                pass
+        # Unmute the audio stream (always send — state may be out of sync)
+        self._audio_slot_muted = False
+        threading.Thread(
+            target=cdp_evaluate,
+            args=(self._audio_slot_port, AUDIO_SLOT_UNMUTE_JS, 3, 1),
+            daemon=True,
+        ).start()
         self._audio_slot_update_btn_states()
         self._update_audio_indicator()
 
