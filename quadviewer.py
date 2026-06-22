@@ -1839,6 +1839,8 @@ class QuadViewerApp:
         self._drag_source_idx = None
         self._drag_indicator = None
         self._drag_is_reorder = False
+        self._drag_source_item = None
+        self._drag_parent = None
 
         self._build_gui()
         self._apply_restored_assignments()
@@ -2494,6 +2496,8 @@ class QuadViewerApp:
         self._drag_channel = ch
         self._drag_source_idx = self.channels.index(ch)
         self._drag_is_reorder = False
+        self._drag_source_item = item
+        self._drag_parent = self.channel_tree.parent(item)
 
     def _drag_motion(self, event):
         if self._drag_channel is None:
@@ -2507,8 +2511,15 @@ class QuadViewerApp:
         tw = self.channel_tree.winfo_width()
         th = self.channel_tree.winfo_height()
         over_tree = tx <= abs_x <= tx + tw and ty <= abs_y <= ty + th
-        # Disable reorder when categories are shown (ambiguous ordering)
-        self._drag_is_reorder = over_tree and not self._show_categories.get()
+
+        # Reorder allowed when dragging over a sibling channel (same parent)
+        self._drag_is_reorder = False
+        if over_tree:
+            local_y = abs_y - self.channel_tree.winfo_rooty()
+            hover_item = self.channel_tree.identify_row(local_y)
+            if hover_item and self._tree_item_map.get(hover_item):
+                if self.channel_tree.parent(hover_item) == self._drag_parent:
+                    self._drag_is_reorder = True
 
         if self._drag_indicator is None:
             self._drag_indicator = tk.Toplevel(self.root)
@@ -2536,15 +2547,16 @@ class QuadViewerApp:
             local_y = abs_y - self.channel_tree.winfo_rooty()
             target_item = self.channel_tree.identify_row(local_y)
             if target_item and self._tree_item_map.get(target_item):
-                children = list(self.channel_tree.get_children())
-                target_idx = children.index(target_item)
-                if target_idx != self._drag_source_idx:
+                siblings = list(self.channel_tree.get_children(self._drag_parent))
+                source_sib_idx = siblings.index(self._drag_source_item)
+                target_sib_idx = siblings.index(target_item)
+                if target_sib_idx != source_sib_idx:
                     self.channel_tree.item(target_item, tags=("drop_target",))
                     # Draw insertion line
                     bbox = self.channel_tree.bbox(target_item)
                     if bbox:
                         lx, ly, lw, lh = bbox
-                        if target_idx > self._drag_source_idx:
+                        if target_sib_idx > source_sib_idx:
                             line_y = ly + lh  # insert below
                         else:
                             line_y = ly  # insert above
@@ -2622,6 +2634,11 @@ class QuadViewerApp:
             if "drop_target" in current_tags:
                 new_tags = tuple(t for t in current_tags if t != "drop_target")
                 self.channel_tree.item(item, tags=new_tags)
+            for child in self.channel_tree.get_children(item):
+                child_tags = self.channel_tree.item(child, "tags")
+                if "drop_target" in child_tags:
+                    new_tags = tuple(t for t in child_tags if t != "drop_target")
+                    self.channel_tree.item(child, tags=new_tags)
         if self._drop_line is not None:
             self._drop_line.withdraw()
 
@@ -2629,6 +2646,8 @@ class QuadViewerApp:
         self._drag_channel = None
         self._drag_source_idx = None
         self._drag_is_reorder = False
+        self._drag_source_item = None
+        self._drag_parent = None
         self._clear_drop_highlight()
         if self._drop_line is not None:
             self._drop_line.destroy()
@@ -3293,6 +3312,7 @@ class QuadViewerApp:
                 "--no-first-run",
                 "--no-default-browser-check",
                 "--disable-features=MediaRouter",
+                "--autoplay-policy=no-user-gesture-required",
             ]
 
             # Block Spectrum in-home authentication (IP-based auto-login)
@@ -3603,6 +3623,7 @@ class QuadViewerApp:
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-features=MediaRouter",
+            "--autoplay-policy=no-user-gesture-required",
         ]
         self._audio_slot_proc = subprocess.Popen(cmd)
         self._audio_slot_port = AUDIO_SLOT_CDP_PORT
@@ -4060,7 +4081,7 @@ class QuadViewerApp:
 
         about_text = (
             "DevCon QuadViewer\n"
-            "Version 2.0\n\n"
+            "Version 2.1\n\n"
             "by DevCon Productions\n"
             "Cleveland, Ohio, USA\n\n"
             "Copyright \u00a9 2026 by DevCon Productions\n"

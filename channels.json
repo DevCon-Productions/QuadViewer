@@ -864,6 +864,14 @@
     "youtube_search": "Yahoo Finance 24/7 Stream: Daily Market Coverage & more"
   },
   {
+    "name": "Mellooow_",
+    "url": "https://www.twitch.tv/mellooow_",
+    "logo": "mellooow_.png",
+    "categories": [
+      "Twitch"
+    ]
+  },
+  {
     "name": "Miekii",
     "url": "https://www.twitch.tv/miekii",
     "logo": "Miekii.png",
@@ -875,14 +883,6 @@
     "name": "Nest",
     "url": "https://www.twitch.tv/nest",
     "logo": "nest.png",
-    "categories": [
-      "Twitch"
-    ]
-  },
-  {
-    "name": "Mellooow_",
-    "url": "https://www.twitch.tv/mellooow_",
-    "logo": "mellooow_.png",
     "categories": [
       "Twitch"
     ]
