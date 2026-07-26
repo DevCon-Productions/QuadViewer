@@ -2440,9 +2440,11 @@ class QuadViewerApp:
         url_row = ttk.Frame(audio_frame)
         url_row.pack(fill=tk.X, pady=(0, 4))
         ttk.Label(url_row, text="URL:").pack(side=tk.LEFT, padx=(0, 4))
-        self._audio_slot_url_var = tk.StringVar(value=AUDIO_SLOT_DEFAULT_URL)
         self._audio_slot_url_history = load_settings().get(
             "audio_slot_urls", [AUDIO_SLOT_DEFAULT_URL]
+        )
+        self._audio_slot_url_var = tk.StringVar(
+            value=self._audio_slot_url_history[0] if self._audio_slot_url_history else AUDIO_SLOT_DEFAULT_URL
         )
         self._audio_slot_combo = ttk.Combobox(
             url_row, textvariable=self._audio_slot_url_var,
