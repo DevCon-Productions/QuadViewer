@@ -17,6 +17,7 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import shutil
@@ -93,6 +94,11 @@ AUDIO_SLOT_DEFAULT_URL = "https://www.mlb.com"
 # Profile name to auto-select on Fubo / Spectrum
 PROFILE_NAME = "Devon"
 
+# App version & GitHub update checking
+APP_VERSION = "2.2"
+GITHUB_REPO = "DevCon-Productions/QuadViewer"
+GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+
 
 def _copy_default_data():
     """Copy bundled data files to SCRIPT_DIR on every launch (frozen builds).
@@ -125,6 +131,76 @@ def find_chrome():
         if os.path.isfile(path):
             return path
     return None
+
+
+# ---------------------------------------------------------------------------
+# Auto-update from GitHub releases
+# ---------------------------------------------------------------------------
+
+def _parse_version(tag):
+    """Parse a version tag like 'v2.1' or '2.1' into a tuple of ints."""
+    tag = tag.lstrip("v")
+    parts = []
+    for p in tag.split("."):
+        try:
+            parts.append(int(p))
+        except ValueError:
+            parts.append(0)
+    return tuple(parts)
+
+
+def _check_for_update():
+    """Check GitHub for a newer release. Returns (tag, download_url) or None."""
+    try:
+        req = urllib.request.Request(
+            GITHUB_API_LATEST,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": f"DevConQuadViewer/{APP_VERSION}",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        tag = data.get("tag_name", "")
+        if not tag:
+            return None
+
+        if _parse_version(tag) <= _parse_version(APP_VERSION):
+            return None
+
+        for asset in data.get("assets", []):
+            name = asset.get("name", "")
+            if name.lower().endswith(".exe"):
+                return (tag, asset["browser_download_url"], data.get("body", ""))
+
+        return None
+    except Exception:
+        return None
+
+
+def _download_installer(url, progress_callback=None):
+    """Download the installer to a temp file, returning the path."""
+    req = urllib.request.Request(
+        url, headers={"User-Agent": f"DevConQuadViewer/{APP_VERSION}"}
+    )
+    resp = urllib.request.urlopen(req, timeout=120)
+    total = int(resp.headers.get("Content-Length", 0))
+
+    tmp = tempfile.NamedTemporaryFile(
+        suffix=".exe", prefix="QuadViewerSetup_", delete=False
+    )
+    downloaded = 0
+    while True:
+        chunk = resp.read(65536)
+        if not chunk:
+            break
+        tmp.write(chunk)
+        downloaded += len(chunk)
+        if progress_callback and total:
+            progress_callback(downloaded, total)
+    tmp.close()
+    return tmp.name
 
 
 def load_channels():
@@ -1866,6 +1942,100 @@ class QuadViewerApp:
             target=self._hotkey_loop, daemon=True
         )
         self._hotkey_thread.start()
+
+        # Check for updates after UI is ready
+        threading.Thread(target=self._update_check_thread, daemon=True).start()
+
+    # ---- Auto-update ----------------------------------------------------------
+
+    def _update_check_thread(self):
+        """Background thread: check GitHub for a newer release."""
+        time.sleep(3)
+        result = _check_for_update()
+        if result:
+            tag, download_url, release_notes = result
+            self.root.after(0, self._prompt_update, tag, download_url, release_notes)
+
+    def _prompt_update(self, tag, download_url, release_notes):
+        """Show a dialog offering to download and install the update."""
+        version_str = tag.lstrip("v")
+        msg = (
+            f"A new version of QuadViewer is available!\n\n"
+            f"Current version: {APP_VERSION}\n"
+            f"New version: {version_str}\n"
+        )
+        if release_notes:
+            short_notes = release_notes.strip()
+            if len(short_notes) > 500:
+                short_notes = short_notes[:500] + "..."
+            msg += f"\n{short_notes}\n"
+        msg += "\nWould you like to download and install the update?"
+
+        if messagebox.askyesno("Update Available", msg, parent=self.root):
+            self._download_and_install(download_url)
+
+    def _download_and_install(self, url):
+        """Download the installer with a progress dialog, then launch it."""
+        win = tk.Toplevel(self.root)
+        win.title("Downloading Update")
+        _set_icon(win)
+        win.resizable(False, False)
+        win.grab_set()
+
+        ttk.Label(win, text="Downloading update...", font=("Segoe UI", 10)).pack(
+            padx=20, pady=(15, 5)
+        )
+        progress_var = tk.DoubleVar(value=0)
+        progress_bar = ttk.Progressbar(
+            win, variable=progress_var, maximum=100, length=300
+        )
+        progress_bar.pack(padx=20, pady=5)
+        status_label = ttk.Label(win, text="0%", font=("Segoe UI", 9))
+        status_label.pack(padx=20, pady=(0, 15))
+
+        win.update_idletasks()
+        pw = self.root.winfo_width()
+        ph = self.root.winfo_height()
+        px = self.root.winfo_x()
+        py = self.root.winfo_y()
+        w = win.winfo_width()
+        h = win.winfo_height()
+        win.geometry(f"+{px + (pw - w) // 2}+{py + (ph - h) // 2}")
+
+        def on_progress(downloaded, total):
+            pct = (downloaded / total) * 100
+            self.root.after(0, lambda: (
+                progress_var.set(pct),
+                status_label.config(text=f"{pct:.0f}%  ({downloaded // 1024} KB / {total // 1024} KB)")
+            ))
+
+        def do_download():
+            try:
+                path = _download_installer(url, on_progress)
+                self.root.after(0, lambda: _finish_install(path))
+            except Exception as e:
+                self.root.after(0, lambda: _download_failed(str(e)))
+
+        def _finish_install(installer_path):
+            win.destroy()
+            if messagebox.askyesno(
+                "Install Update",
+                "Download complete. QuadViewer will close and the installer will run.\n\n"
+                "Continue?",
+                parent=self.root,
+            ):
+                subprocess.Popen([installer_path], shell=True)
+                self._on_close()
+
+        def _download_failed(error):
+            win.destroy()
+            messagebox.showerror(
+                "Update Failed",
+                f"Failed to download the update:\n\n{error}",
+                parent=self.root,
+            )
+
+        threading.Thread(target=do_download, daemon=True).start()
 
     def _restore_assignments(self):
         """Load saved quadrant assignments from disk."""
@@ -4081,7 +4251,7 @@ class QuadViewerApp:
 
         about_text = (
             "DevCon QuadViewer\n"
-            "Version 2.1\n\n"
+            f"Version {APP_VERSION}\n\n"
             "by DevCon Productions\n"
             "Cleveland, Ohio, USA\n\n"
             "Copyright \u00a9 2026 by DevCon Productions\n"
