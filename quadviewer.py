@@ -101,17 +101,17 @@ GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest
 
 
 def _copy_default_data():
-    """Copy bundled data files to SCRIPT_DIR on every launch (frozen builds).
+    """Copy bundled data files to SCRIPT_DIR on first launch (frozen builds).
 
-    This ensures upgrades always deliver the latest default channels/presets.
-    Users can use Export/Import to preserve custom channel lists across updates.
+    Only copies if the user's file doesn't exist yet, so that user edits
+    (channel reordering, additions, etc.) are preserved across restarts.
     """
     if _DATA_DIR == SCRIPT_DIR:
         return
     for fname in ("channels.json", "presets.json"):
         src = os.path.join(_DATA_DIR, fname)
-        if os.path.isfile(src):
-            dest = os.path.join(SCRIPT_DIR, fname)
+        dest = os.path.join(SCRIPT_DIR, fname)
+        if os.path.isfile(src) and not os.path.isfile(dest):
             shutil.copy2(src, dest)
 
 _copy_default_data()
@@ -395,13 +395,41 @@ def get_quadrant_rect(quad_name, work_x, work_y, work_w, work_h):
     return _clamp_rect_to_screen(x, y, w, h)
 
 
-def get_smart_rects(active_quads, work_x, work_y, work_w, work_h):
+def get_portrait_rects(active_quads, work_x, work_y, work_w, work_h):
+    """Compute window rects for portrait mode: up to 3 windows stacked vertically."""
+    names = list(active_quads)
+    n = len(names)
+
+    if n == 1:
+        return {names[0]: _clamp_rect_to_screen(
+            work_x - WIN_BORDER,
+            work_y - WIN_BORDER,
+            work_w + 2 * WIN_BORDER,
+            work_h + 2 * WIN_BORDER,
+        )}
+
+    third_h = work_h // n
+    rects = {}
+    for i, q in enumerate(names):
+        x = work_x - WIN_BORDER
+        y = work_y + i * third_h - WIN_BORDER
+        w = work_w + 2 * WIN_BORDER
+        h = third_h + 2 * WIN_BORDER
+        rects[q] = _clamp_rect_to_screen(x, y, w, h)
+    return rects
+
+
+def get_smart_rects(active_quads, work_x, work_y, work_w, work_h, portrait=False):
     """Compute window rects based on how many quadrants are active.
 
     1 window  -> full screen
     2 windows -> side-by-side or stacked based on quadrant positions
     3-4       -> standard quadrant layout
+    portrait  -> stacked vertically (up to 3 windows)
     """
+    if portrait:
+        return get_portrait_rects(active_quads, work_x, work_y, work_w, work_h)
+
     names = list(active_quads)
     n = len(names)
 
@@ -1899,6 +1927,8 @@ class QuadViewerApp:
             value=settings.get("show_categories", False)
         )
         self._custom_categories = settings.get("custom_categories", [])
+        self._portrait_p1 = tk.BooleanVar(value=settings.get("portrait_p1", False))
+        self._portrait_p2 = tk.BooleanVar(value=settings.get("portrait_p2", False))
 
         # Tree item ID -> channel dict mapping (updated by _populate_tree)
         self._tree_item_map = {}
@@ -2047,6 +2077,8 @@ class QuadViewerApp:
 
     def _update_quad_display(self, quad_name, channel):
         """Update a quadrant's label and logo image."""
+        if quad_name not in self.quad_labels:
+            return
         if channel:
             self.quad_labels[quad_name].config(text=channel["name"])
             logo = self._get_logo(channel.get("logo", ""), LOGO_LARGE)
@@ -2171,10 +2203,15 @@ class QuadViewerApp:
 
     # ---- GUI construction --------------------------------------------------
 
+    # Portrait mode slot names displayed in the GUI
+    _PORTRAIT_NAMES = ["Top", "Middle", "Bottom"]
+
     def _build_panel_tab(self, parent, positions, audio_label, panel_prefix):
-        """Build a 2x2 quadrant grid + audio buttons + Move All for one panel tab."""
+        """Build a quadrant grid + audio buttons + Move All for one panel tab."""
         # Pack bottom controls FIRST so they always stay visible
         # (Tkinter pack order = space priority).
+
+        portrait_var = self._portrait_p2 if panel_prefix else self._portrait_p1
 
         # Move all windows for this panel
         move_frame = ttk.LabelFrame(parent, text="Move All Windows", padding=4)
@@ -2199,16 +2236,57 @@ class QuadViewerApp:
                 command=lambda q=quad_name_audio: self._set_audio_solo(q),
             ).pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
 
-        # Quad grid fills remaining space
+        # Portrait mode toggle
+        ttk.Checkbutton(
+            parent, text="Portrait Mode (3 stacked windows)",
+            variable=portrait_var,
+            command=lambda: self._rebuild_panel_grid(parent, positions, panel_prefix, portrait_var),
+        ).pack(side=tk.BOTTOM, fill=tk.X, pady=(4, 0))
+
+        # Quad grid fills remaining space \u2014 built by helper so it can be rebuilt
         grid_frame = ttk.Frame(parent)
         grid_frame.pack(fill=tk.BOTH, expand=True)
-        grid_frame.columnconfigure(0, weight=1)
-        grid_frame.columnconfigure(1, weight=1)
-        grid_frame.rowconfigure(0, weight=1)
-        grid_frame.rowconfigure(1, weight=1)
+        # Store reference for rebuilding
+        if panel_prefix:
+            self._p2_grid_frame = grid_frame
+        else:
+            self._p1_grid_frame = grid_frame
 
-        for quad_name, row, col in positions:
-            display_name = quad_name.removeprefix("P2 ") if panel_prefix else quad_name
+        self._populate_panel_grid(grid_frame, positions, panel_prefix, portrait_var.get())
+
+    def _populate_panel_grid(self, grid_frame, positions, panel_prefix, portrait):
+        """Populate the quadrant grid inside a panel tab."""
+        # Clear existing widgets
+        for widget in grid_frame.winfo_children():
+            widget.destroy()
+
+        if portrait:
+            # Portrait: 3 rows x 1 col, using first 3 quad slots
+            grid_frame.columnconfigure(0, weight=1)
+            grid_frame.columnconfigure(1, weight=0)
+            grid_frame.rowconfigure(0, weight=1)
+            grid_frame.rowconfigure(1, weight=1)
+            grid_frame.rowconfigure(2, weight=1)
+            active_positions = []
+            for i, (quad_name, _row, _col) in enumerate(positions[:3]):
+                active_positions.append((quad_name, i, 0))
+            # Clear 4th slot assignment if switching to portrait
+            if len(positions) > 3:
+                fourth_quad = positions[3][0]
+                self.assignments[fourth_quad] = None
+        else:
+            # Landscape: 2x2 grid
+            grid_frame.columnconfigure(0, weight=1)
+            grid_frame.columnconfigure(1, weight=1)
+            grid_frame.rowconfigure(0, weight=1)
+            grid_frame.rowconfigure(1, weight=1)
+            active_positions = positions
+
+        for idx, (quad_name, row, col) in enumerate(active_positions):
+            if portrait:
+                display_name = self._PORTRAIT_NAMES[idx]
+            else:
+                display_name = quad_name.removeprefix("P2 ") if panel_prefix else quad_name
             frame = ttk.LabelFrame(grid_frame, text=display_name, padding=8)
             frame.grid(row=row, column=col, padx=4, pady=4, sticky="nsew")
             self.quad_frames[quad_name] = frame
@@ -2218,13 +2296,23 @@ class QuadViewerApp:
             btn_frame = ttk.Frame(frame)
             btn_frame.pack(side=tk.BOTTOM, pady=(6, 0))
 
-            label = ttk.Label(frame, text="(empty)", anchor="center", width=18)
+            # Restore existing assignment text
+            ch = self.assignments.get(quad_name)
+            label_text = ch["name"] if ch else "(empty)"
+            label = ttk.Label(frame, text=label_text, anchor="center", width=18)
             label.pack(side=tk.BOTTOM, pady=(0, 2))
 
             logo_label = ttk.Label(frame, anchor="center")
             logo_label.pack(side=tk.TOP, pady=(2, 0))
             self.quad_logos[quad_name] = logo_label
             self.quad_labels[quad_name] = label
+
+            # Restore logo if assigned
+            if ch:
+                logo = self._get_logo(ch.get("logo", ""), LOGO_LARGE)
+                if logo:
+                    logo_label.config(image=logo)
+
             ttk.Button(
                 btn_frame, text="Set",
                 command=lambda q=quad_name: self._set_quadrant(q),
@@ -2264,8 +2352,15 @@ class QuadViewerApp:
                 command=lambda q=quad_name: self._move_quad_to_monitor(q, "right"),
             ).pack(side=tk.LEFT, padx=2)
 
-        # (Audio and Move All controls are packed above the grid
-        # with side=BOTTOM so they always stay visible.)
+    def _rebuild_panel_grid(self, parent, positions, panel_prefix, portrait_var):
+        """Rebuild the panel grid when portrait mode is toggled."""
+        grid_frame = self._p2_grid_frame if panel_prefix else self._p1_grid_frame
+        self._populate_panel_grid(grid_frame, positions, panel_prefix, portrait_var.get())
+        # Save the setting
+        settings = load_settings()
+        key = "portrait_p2" if panel_prefix else "portrait_p1"
+        settings[key] = portrait_var.get()
+        save_settings(settings)
 
     def _build_gui(self):
         # Menu bar
@@ -3174,9 +3269,22 @@ class QuadViewerApp:
             )
             return
 
-        # Compute geometry based on all currently active quadrants + this one
+        # Compute geometry — use portrait layout if the panel has it enabled
         work_x, work_y, work_w, work_h = get_work_area(self.hide_taskbar.get())
-        x, y, w, h = get_quadrant_rect(quad_name, work_x, work_y, work_w, work_h)
+        is_p2 = quad_name.startswith("P2 ")
+        is_portrait = (self._portrait_p2 if is_p2 else self._portrait_p1).get()
+        if is_portrait:
+            panel_quads = PANEL2_QUADRANTS if is_p2 else QUADRANTS
+            active_for_panel = {
+                q: ch for q, ch in self.assignments.items()
+                if ch is not None and q in panel_quads
+            }
+            if quad_name not in active_for_panel:
+                active_for_panel[quad_name] = channel
+            rects = get_portrait_rects(active_for_panel, work_x, work_y, work_w, work_h)
+            x, y, w, h = rects[quad_name]
+        else:
+            x, y, w, h = get_quadrant_rect(quad_name, work_x, work_y, work_w, work_h)
         self._quad_rects[quad_name] = (x, y, w, h)
 
         profile_dir = self._get_profile_dir(quad_name)
@@ -3455,7 +3563,9 @@ class QuadViewerApp:
         for quad_name in panel_quads:
             self._close_quadrant(quad_name)
 
-        rects = get_smart_rects(active, work_x, work_y, work_w, work_h)
+        selected = self.notebook.index(self.notebook.select())
+        is_portrait = (self._portrait_p2 if selected == 1 else self._portrait_p1).get()
+        rects = get_smart_rects(active, work_x, work_y, work_w, work_h, portrait=is_portrait)
 
         for quad_name, channel in active.items():
             url = _get_launch_url(channel)
