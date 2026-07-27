@@ -95,7 +95,7 @@ AUDIO_SLOT_DEFAULT_URL = "https://www.mlb.com"
 PROFILE_NAME = "Devon"
 
 # App version & GitHub update checking
-APP_VERSION = "2.2"
+APP_VERSION = "2.3"
 GITHUB_REPO = "DevCon-Productions/QuadViewer"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
@@ -1986,6 +1986,21 @@ class QuadViewerApp:
             tag, download_url, release_notes = result
             self.root.after(0, self._prompt_update, tag, download_url, release_notes)
 
+    def _manual_update_check(self):
+        """User-triggered update check from the Help menu."""
+        def check():
+            result = _check_for_update()
+            if result:
+                tag, download_url, release_notes = result
+                self.root.after(0, self._prompt_update, tag, download_url, release_notes)
+            else:
+                self.root.after(0, lambda: messagebox.showinfo(
+                    "No Updates",
+                    f"You are running the latest version ({APP_VERSION}).",
+                    parent=self.root,
+                ))
+        threading.Thread(target=check, daemon=True).start()
+
     def _prompt_update(self, tag, download_url, release_notes):
         """Show a dialog offering to download and install the update."""
         version_str = tag.lstrip("v")
@@ -2287,70 +2302,138 @@ class QuadViewerApp:
                 display_name = self._PORTRAIT_NAMES[idx]
             else:
                 display_name = quad_name.removeprefix("P2 ") if panel_prefix else quad_name
-            frame = ttk.LabelFrame(grid_frame, text=display_name, padding=8)
-            frame.grid(row=row, column=col, padx=4, pady=4, sticky="nsew")
-            self.quad_frames[quad_name] = frame
 
-            btn_frame2 = ttk.Frame(frame)
-            btn_frame2.pack(side=tk.BOTTOM, pady=(2, 0))
-            btn_frame = ttk.Frame(frame)
-            btn_frame.pack(side=tk.BOTTOM, pady=(6, 0))
-
-            # Restore existing assignment text
             ch = self.assignments.get(quad_name)
-            label_text = ch["name"] if ch else "(empty)"
-            label = ttk.Label(frame, text=label_text, anchor="center", width=18)
-            label.pack(side=tk.BOTTOM, pady=(0, 2))
 
-            logo_label = ttk.Label(frame, anchor="center")
-            logo_label.pack(side=tk.TOP, pady=(2, 0))
-            self.quad_logos[quad_name] = logo_label
-            self.quad_labels[quad_name] = label
+            if portrait:
+                # Compact horizontal layout for portrait mode
+                frame = ttk.LabelFrame(grid_frame, text=display_name, padding=4)
+                frame.grid(row=row, column=col, padx=4, pady=2, sticky="nsew")
+                self.quad_frames[quad_name] = frame
 
-            # Restore logo if assigned
-            if ch:
-                logo = self._get_logo(ch.get("logo", ""), LOGO_LARGE)
-                if logo:
-                    logo_label.config(image=logo)
+                # Left side: logo + name
+                info_frame = ttk.Frame(frame)
+                info_frame.pack(side=tk.LEFT, padx=(0, 8))
 
-            ttk.Button(
-                btn_frame, text="Set",
-                command=lambda q=quad_name: self._set_quadrant(q),
-            ).pack(side=tk.LEFT, padx=2)
-            ttk.Button(
-                btn_frame, text="Clear",
-                command=lambda q=quad_name: self._clear_quadrant(q),
-            ).pack(side=tk.LEFT, padx=2)
-            ttk.Button(
-                btn_frame, text="Front",
-                command=lambda q=quad_name: self._bring_quad_to_front(q),
-            ).pack(side=tk.LEFT, padx=2)
-            max_btn = ttk.Button(
-                btn_frame, text="Max",
-                command=lambda q=quad_name: self._toggle_maximize(q),
-            )
-            max_btn.pack(side=tk.LEFT, padx=2)
-            self.quad_max_btns[quad_name] = max_btn
-            ttk.Button(
-                btn_frame2, text="Switch",
-                command=lambda q=quad_name: self._switch_quadrant(q),
-            ).pack(side=tk.LEFT, padx=2)
-            ttk.Button(
-                btn_frame2, text="Close",
-                command=lambda q=quad_name: self._close_quadrant(q),
-            ).pack(side=tk.LEFT, padx=2)
-            ttk.Button(
-                btn_frame2, text="Open",
-                command=lambda q=quad_name: self._open_quadrant(q),
-            ).pack(side=tk.LEFT, padx=2)
-            ttk.Button(
-                btn_frame2, text="\u25c4", width=2,
-                command=lambda q=quad_name: self._move_quad_to_monitor(q, "left"),
-            ).pack(side=tk.LEFT, padx=2)
-            ttk.Button(
-                btn_frame2, text="\u25ba", width=2,
-                command=lambda q=quad_name: self._move_quad_to_monitor(q, "right"),
-            ).pack(side=tk.LEFT, padx=2)
+                logo_label = ttk.Label(info_frame, anchor="center")
+                logo_label.pack(side=tk.LEFT, padx=(0, 6))
+                self.quad_logos[quad_name] = logo_label
+
+                label_text = ch["name"] if ch else "(empty)"
+                label = ttk.Label(info_frame, text=label_text, anchor="w", width=14)
+                label.pack(side=tk.LEFT)
+                self.quad_labels[quad_name] = label
+
+                if ch:
+                    logo = self._get_logo(ch.get("logo", ""), LOGO_SMALL)
+                    if logo:
+                        logo_label.config(image=logo)
+
+                # Right side: all buttons in one row
+                btn_frame = ttk.Frame(frame)
+                btn_frame.pack(side=tk.RIGHT)
+
+                ttk.Button(
+                    btn_frame, text="Set",
+                    command=lambda q=quad_name: self._set_quadrant(q),
+                ).pack(side=tk.LEFT, padx=1)
+                ttk.Button(
+                    btn_frame, text="Clear",
+                    command=lambda q=quad_name: self._clear_quadrant(q),
+                ).pack(side=tk.LEFT, padx=1)
+                ttk.Button(
+                    btn_frame, text="Front",
+                    command=lambda q=quad_name: self._bring_quad_to_front(q),
+                ).pack(side=tk.LEFT, padx=1)
+                max_btn = ttk.Button(
+                    btn_frame, text="Max",
+                    command=lambda q=quad_name: self._toggle_maximize(q),
+                )
+                max_btn.pack(side=tk.LEFT, padx=1)
+                self.quad_max_btns[quad_name] = max_btn
+                ttk.Button(
+                    btn_frame, text="Switch",
+                    command=lambda q=quad_name: self._switch_quadrant(q),
+                ).pack(side=tk.LEFT, padx=1)
+                ttk.Button(
+                    btn_frame, text="Close",
+                    command=lambda q=quad_name: self._close_quadrant(q),
+                ).pack(side=tk.LEFT, padx=1)
+                ttk.Button(
+                    btn_frame, text="Open",
+                    command=lambda q=quad_name: self._open_quadrant(q),
+                ).pack(side=tk.LEFT, padx=1)
+                ttk.Button(
+                    btn_frame, text="\u25c4", width=2,
+                    command=lambda q=quad_name: self._move_quad_to_monitor(q, "left"),
+                ).pack(side=tk.LEFT, padx=1)
+                ttk.Button(
+                    btn_frame, text="\u25ba", width=2,
+                    command=lambda q=quad_name: self._move_quad_to_monitor(q, "right"),
+                ).pack(side=tk.LEFT, padx=1)
+            else:
+                # Standard vertical layout for landscape mode
+                frame = ttk.LabelFrame(grid_frame, text=display_name, padding=8)
+                frame.grid(row=row, column=col, padx=4, pady=4, sticky="nsew")
+                self.quad_frames[quad_name] = frame
+
+                btn_frame2 = ttk.Frame(frame)
+                btn_frame2.pack(side=tk.BOTTOM, pady=(2, 0))
+                btn_frame = ttk.Frame(frame)
+                btn_frame.pack(side=tk.BOTTOM, pady=(6, 0))
+
+                label_text = ch["name"] if ch else "(empty)"
+                label = ttk.Label(frame, text=label_text, anchor="center", width=18)
+                label.pack(side=tk.BOTTOM, pady=(0, 2))
+
+                logo_label = ttk.Label(frame, anchor="center")
+                logo_label.pack(side=tk.TOP, pady=(2, 0))
+                self.quad_logos[quad_name] = logo_label
+                self.quad_labels[quad_name] = label
+
+                if ch:
+                    logo = self._get_logo(ch.get("logo", ""), LOGO_LARGE)
+                    if logo:
+                        logo_label.config(image=logo)
+
+                ttk.Button(
+                    btn_frame, text="Set",
+                    command=lambda q=quad_name: self._set_quadrant(q),
+                ).pack(side=tk.LEFT, padx=2)
+                ttk.Button(
+                    btn_frame, text="Clear",
+                    command=lambda q=quad_name: self._clear_quadrant(q),
+                ).pack(side=tk.LEFT, padx=2)
+                ttk.Button(
+                    btn_frame, text="Front",
+                    command=lambda q=quad_name: self._bring_quad_to_front(q),
+                ).pack(side=tk.LEFT, padx=2)
+                max_btn = ttk.Button(
+                    btn_frame, text="Max",
+                    command=lambda q=quad_name: self._toggle_maximize(q),
+                )
+                max_btn.pack(side=tk.LEFT, padx=2)
+                self.quad_max_btns[quad_name] = max_btn
+                ttk.Button(
+                    btn_frame2, text="Switch",
+                    command=lambda q=quad_name: self._switch_quadrant(q),
+                ).pack(side=tk.LEFT, padx=2)
+                ttk.Button(
+                    btn_frame2, text="Close",
+                    command=lambda q=quad_name: self._close_quadrant(q),
+                ).pack(side=tk.LEFT, padx=2)
+                ttk.Button(
+                    btn_frame2, text="Open",
+                    command=lambda q=quad_name: self._open_quadrant(q),
+                ).pack(side=tk.LEFT, padx=2)
+                ttk.Button(
+                    btn_frame2, text="\u25c4", width=2,
+                    command=lambda q=quad_name: self._move_quad_to_monitor(q, "left"),
+                ).pack(side=tk.LEFT, padx=2)
+                ttk.Button(
+                    btn_frame2, text="\u25ba", width=2,
+                    command=lambda q=quad_name: self._move_quad_to_monitor(q, "right"),
+                ).pack(side=tk.LEFT, padx=2)
 
     def _rebuild_panel_grid(self, parent, positions, panel_prefix, portrait_var):
         """Rebuild the panel grid when portrait mode is toggled."""
@@ -2374,6 +2457,7 @@ class QuadViewerApp:
         help_menu.add_command(label="Help", command=self._show_help)
         help_menu.add_command(label="YouTube Tutorial", command=self._open_youtube_tutorial)
         help_menu.add_separator()
+        help_menu.add_command(label="Check for Updates...", command=self._manual_update_check)
         help_menu.add_command(label="About", command=self._show_about)
         options_menu = tk.Menu(menubar, tearoff=0)
         options_menu.add_command(label="Preferences...", command=self._show_preferences)

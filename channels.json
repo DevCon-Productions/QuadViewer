@@ -1001,5 +1001,95 @@
     ],
     "youtube_handle": "@loveflightjack",
     "youtube_search": "LIVE at NARITA International Airport Plane Spotting　2026.04.15 成田空港ライブカメラ 成田空港　NRT/RJAA"
+  },
+  {
+    "name": "Katami National Park (Bears)",
+    "url": "https://www.youtube.com/watch?v=J7ZrIDvqlic",
+    "logo": "Bear.png",
+    "categories": [
+      "Webcams",
+      "YouTube"
+    ],
+    "youtube_handle": "@ExploreLiveNatureCams",
+    "youtube_search": "LIVE Brooks Falls - Katmai National Park, Alaska 2026 | explore.org"
+  },
+  {
+    "name": "Laguardia (LGA)",
+    "url": "https://www.youtube.com/watch?v=OUBslrCqREs",
+    "logo": "LGA.png",
+    "categories": [
+      "Airports",
+      "Webcams",
+      "YouTube"
+    ],
+    "youtube_handle": "@flightradar24dotcom",
+    "youtube_search": "LGA Airport LIVE 24/7 • LaGuardia, New York"
+  },
+  {
+    "name": "Reno Airport (RNO)",
+    "url": "https://www.youtube.com/watch?v=fFl0qD108sk",
+    "logo": "RenoAirport.png",
+    "categories": [
+      "Airports",
+      "Webcams",
+      "YouTube"
+    ],
+    "youtube_handle": "@Flightradar24DotCom",
+    "youtube_search": "RNO Reno Airport LIVE 24/7"
+  },
+  {
+    "name": "New Orleans International Airport (MSY)",
+    "url": "https://www.youtube.com/watch?v=MH0_mPt-VXE",
+    "logo": "MSY.png",
+    "categories": [
+      "Airports",
+      "Webcams",
+      "YouTube"
+    ],
+    "youtube_handle": "@FlightRadar24DotCom",
+    "youtube_search": "FR24 - MSY New Orleans LIVE 24/7"
+  },
+  {
+    "name": "Lanzarote Airport, Canary Islands, Spain (ACE)",
+    "url": "https://www.youtube.com/watch?v=NtbquzembC8",
+    "logo": "ACECanaryIslands.png",
+    "categories": [
+      "Airports",
+      "Webcams",
+      "YouTube"
+    ],
+    "youtube_handle": "@Flightradar24DotCom",
+    "youtube_search": "Skip navigation\njfk airport live\n\n\n\n\nCreate\n\n\nAvatar image\nACE Lanzarote Airport LIVE 24/7 - Canary Islands SPAIN"
+  },
+  {
+    "name": "Sint Mararten Airport (SXM)",
+    "url": "https://www.youtube.com/watch?v=2IQmpCXbOmM",
+    "logo": "SXMSaintMaarten.jpeg",
+    "categories": [
+      "Airports",
+      "Webcams",
+      "YouTube"
+    ],
+    "youtube_handle": "@Flightradar24DotCom",
+    "youtube_search": "Iconic SXM Airport LIVE 24/7 – Sint Maarten Maho Beach"
+  },
+  {
+    "name": "Bald Eagle Nest Cam",
+    "url": "https://www.youtube.com/watch?v=B4-L2nfGcuE",
+    "logo": "Eagle.jpg",
+    "categories": [
+      "Webcams",
+      "YouTube"
+    ],
+    "youtube_handle": "@FOBBVCAM",
+    "youtube_search": "Big Bear Bald Eagle Live Nest - Cam 1"
+  },
+  {
+    "name": "Marblehead Lighthouse",
+    "url": "https://cs9.pixelcaster.com/live/lesi-lighthouse.stream/playlist.m3u8",
+    "logo": "MableheadLighthouse.jpeg",
+    "categories": [
+      "Webcams"
+    ]
   }
 ]
