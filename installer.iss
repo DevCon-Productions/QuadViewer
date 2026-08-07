@@ -3,7 +3,7 @@
 
 [Setup]
 AppName=DevCon QuadViewer
-AppVersion=2.3
+AppVersion=2.3.1
 AppPublisher=DevCon Productions
 AppPublisherURL=https://github.com/DevConProductions
 AppCopyright=Copyright (C) 2026 DevCon Productions

@@ -95,7 +95,7 @@ AUDIO_SLOT_DEFAULT_URL = "https://www.mlb.com"
 PROFILE_NAME = "Devon"
 
 # App version & GitHub update checking
-APP_VERSION = "2.3"
+APP_VERSION = "2.3.1"
 GITHUB_REPO = "DevCon-Productions/QuadViewer"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
