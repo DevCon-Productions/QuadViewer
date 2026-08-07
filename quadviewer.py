@@ -1049,6 +1049,7 @@ INJECTED_JS = r"""
   }
 
   // --- Twitch: hide everything except the video player ---
+  // Press Escape to toggle between fullscreen video and normal Twitch layout
   function twitchCleanup() {
     if (!isTwitch) return false;
     var style = document.getElementById("__qv_tw_style");
@@ -1068,6 +1069,18 @@ INJECTED_JS = r"""
       ".video-player:hover [class*='video-player__overlay'] { opacity:1; }",
     ].join("\n");
     document.head.appendChild(style);
+    // Escape toggles fullscreen CSS on/off so user can interact with the page
+    if (!window.__qv_tw_esc) {
+      window.__qv_tw_esc = true;
+      document.addEventListener("keydown", function(e) {
+        if (e.key === "Escape") {
+          var s = document.getElementById("__qv_tw_style");
+          if (s) { s.disabled = !s.disabled; }
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }, true);
+    }
     return true;
   }
 
